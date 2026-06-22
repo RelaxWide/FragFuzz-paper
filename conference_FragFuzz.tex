@@ -23,6 +23,8 @@
 % Tighter, less-indented lists
 \setlist[itemize]{leftmargin=1.4em, itemsep=1pt, topsep=2pt, parsep=0pt}
 \setlist[enumerate]{leftmargin=1.7em, itemsep=1pt, topsep=2pt, parsep=0pt}
+% Avoid text overflowing into the margin/gutter in the narrow two-column layout
+\setlength{\emergencystretch}{3em}
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 \begin{document}
@@ -264,46 +266,14 @@ TVDA applies these empirically verified patterns to icmp instruction analysis, f
 Since SSD firmware contains tens of thousands of general branches, simple structural analysis alone would result in mass extraction of meaningless variables.
 This strategy effectively eliminates such noise by combining domain-specific patterns, precisely targeting only true positive threshold variables that govern the firmware's core maintenance logic.
 
-\begin{table}[t]
-\centering
-\caption{Dependency Depth Analysis of Threshold Conditions}
-\label{tab:dependency_depth}
-\begin{tabularx}{\columnwidth}{@{}l l X c@{\hspace{1.5mm}}}
-\toprule
-\textbf{Platform} & \textbf{Logic} & \textbf{Critical Sink Condition} & \textbf{$k$} \\
-\midrule
-\multirow{3}{*}{FEMU} & GC Trigger & \texttt{free\_line\_cnt <= thres} & \cellcolor{gray!20}\textbf{5} \\
- & Must-GC & \texttt{free\_line\_cnt <= thres\_high} & \cellcolor{gray!20}\textbf{5} \\
- & Victim Sel. & \texttt{victim->ipc < pgs/8} & \cellcolor{gray!20}\textbf{3} \\
-\midrule
-\multirow{2}{*}{NVMeVirt~\cite{nvmevirt}} & GC Trigger & \texttt{free\_line\_cnt <= thres} & \cellcolor{gray!20}\textbf{5} \\
- & Write Credit & \texttt{write\_credits <= 0} & \cellcolor{gray!20}\textbf{4} \\
-\midrule
-\multirow{2}{*}{MQSim} & GC Trigger & \texttt{free\_blk\_pool < thres} & \cellcolor{gray!20}\textbf{5} \\
- & Static WL & \texttt{erase\_diff >= wl\_thres} & \cellcolor{gray!20}\textbf{4} \\
-\midrule
-\multirow{2}{*}{VSSIM~\cite{vssim}} & GC Trigger & \texttt{empty\_blk\_nb <= thres} & \cellcolor{gray!20}\textbf{5} \\
- & Seq. Detect & \texttt{length >= SEQ\_THRES} & \cellcolor{gray!20}\textbf{3} \\
-\midrule
-\multirow{2}{*}{SimpleSSD~\cite{simplessd}} & GC Trigger & \texttt{freeBlkRatio() < thres} & \cellcolor{gray!20}\textbf{5} \\
- & Cost-Benefit & \texttt{validCnt + time\_factor} & \cellcolor{gray!20}\textbf{4} \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
 \subsubsection*{Step 3: K-hop Backward Slicing}
 
 The identified threshold variables are important in themselves, but they may be the computational results of multiple base variables.
-Therefore, to find the sources of change that the fuzzer can directly control, TVDA performs backward slicing based on the Program Dependency Graph (PDG)~\cite{horwitz_pdg}.
-The most important parameter here is the search depth (Hop Depth, K).
-We analyzed the data dependency depths of major FTL implementations to determine the optimal K value, with results shown in Table~\ref{tab:dependency_depth}. The analysis confirmed that most core logic such as GC Trigger and Wear-Leveling has a maximum dependency distance of 5 hops from the threshold point.
-This consistency stems from the hierarchical data management structure inherent to SSD FTLs.
-From I/O request processing to final reflection in global resource state, there are typically five abstraction layers (Request → Page → Block → Line/Superblock → Global Resource).
-For example, the should\_gc() functions in FEMU and NVMeVirt~\cite{nvmevirt}, and the GC Condition Check logic in MQSim, are all located at the end of this 5-stage data flow.
-In contrast, localized logic such as wear leveling or victim block selection showed shorter dependency distances of 3-4 hops.
-Therefore, we set k=5 as the backward slicing search depth, representing the minimum sufficient condition to encompass all core maintenance logic.
-Therefore, we selected $K=5$ not merely as an empirical value but as a parameter reflecting the five-layer hierarchical structure of FTL architecture.
-Based on this empirical evidence, this research set the TVDA slicing depth to K=5, securing both analysis efficiency and accuracy.
+Therefore, to reach the underlying base variables that the fuzzer can directly control, TVDA automatically performs backward slicing on the Program Dependency Graph (PDG)~\cite{horwitz_pdg}.
+The key parameter is the slicing depth (Hop Depth, $K$), which TVDA fixes algorithmically as part of the automated pipeline, rather than requiring manual, per-platform inspection of simulator source code.
+We set $K=5$ based on the hierarchical data-management structure inherent to SSD FTLs: from I/O request processing to the final update of global resource state, an FTL typically exposes five abstraction layers (Request $\rightarrow$ Page $\rightarrow$ Block $\rightarrow$ Line/Superblock $\rightarrow$ Global Resource), so the conditions that gate core maintenance logic such as GC triggering lie at most five hops from the threshold comparison.
+Localized logic such as wear leveling or victim-block selection sits even closer (3--4 hops).
+Setting $K=5$ therefore provides the minimum sufficient depth for TVDA's automated slicing to capture all core maintenance logic, without any hand-tuning per simulator.
 
 \subsubsection*{Step 4: Instrumentation}
 The final extracted variable list is instrumented at compile time and monitored at runtime through shared memory with minimal overhead.
