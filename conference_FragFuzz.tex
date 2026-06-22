@@ -259,7 +259,7 @@ At this point, operands compared against constants are extracted as potential st
 Subsequently, filtering based on variable naming conventions is performed to precisely select actual threshold variables from the collected candidates.
 
 Based on a recent survey of SSD simulators and emulators~\cite{gheibi2025survey}, we examined five major open-source emulator and simulator platforms that accurately reproduce actual SSD firmware behavior: FEMU~\cite{femu}, MQSim~\cite{mqsim}, ZNS+~\cite{znsplus}, NVMeVirt~\cite{nvmevirt}, and ConfZNS~\cite{confzns}.
-Across all of these platforms, the threshold variables that gate core maintenance logic---such as GC triggering, must-GC, wear leveling, thermal throttling, and lifespan management---consistently follow a small set of naming conventions, sharing keywords such as \texttt{thres}, \texttt{limit}, and \texttt{bound} (for example, FEMU's \texttt{gc\_thres\_lines} and MQSim's \texttt{GC\_Exec\_Threshold}).
+Across all of these platforms, the threshold variables that gate core maintenance logic---such as GC triggering, Must-GC, wear leveling, thermal throttling, and lifespan management---consistently follow a small set of naming conventions, sharing keywords such as \texttt{thres}, \texttt{limit}, and \texttt{bound} (for example, FEMU's \texttt{gc\_thres\_lines} and MQSim's \texttt{GC\_Exec\_Threshold}).
 This empirical regularity is precisely what allows TVDA to remain fully automated: instead of relying on hand-crafted, per-platform variable lists, it exploits these recurring naming patterns as a lightweight, platform-agnostic filter.
 
 TVDA applies these empirically verified patterns to icmp instruction analysis, finalizing variables that structurally correspond to comparison statements while simultaneously satisfying domain naming conventions as Critical Sinks.
@@ -460,7 +460,7 @@ FragFuzz (TVDA+DRP) & \textbf{729,759} & \textbf{1,757,289} \\
 \end{tabularx}
 
 \vspace{2pt}
-{\scriptsize \dg\,GRAFT was run in a modified MQSim (32\,GB device) with offline RL pre-training; GC completion was not reported.}
+{\scriptsize\raggedright \dg\,GRAFT was run in a modified MQSim (32\,GB device) with offline RL pre-training; GC completion was not reported.\par}
 \end{table}
 
 FragFuzz (TVDA+DRP) required an average of only 729,759 commands to trigger GC, reaching the target with 52.5\% fewer commands than AFL++ and 28.8\% fewer commands than CSFuzz.
@@ -479,7 +479,7 @@ To assess exploration of the maintenance datapath specifically, we manually cura
 This confirms that the relevant differentiator among fuzzers is not the final coverage plateau but the number of commands required to reach the deep maintenance logic, which is the primary metric adopted throughout this evaluation.
 
 \subsection{RQ2: Effectiveness of TVDA}
-The core value of TVDA lies not in ``how many variables are extracted'' but in `how precisely critical variables that actually affect GC triggering are selected.'' This section qualitatively and quantitatively compares CSFuzz's ASan~\cite{asan}-based heuristics with TVDA's threshold pattern matching results.
+The core value of TVDA lies not in ``how many variables are extracted'' but in ``how precisely critical variables that actually affect GC triggering are selected.'' This section qualitatively and quantitatively compares CSFuzz's ASan~\cite{asan}-based heuristics with TVDA's threshold pattern matching results.
 
 \subsubsection{Extracted Variable Count Comparison}
 
@@ -505,16 +505,12 @@ However, more variables do not mean more effective state tracking.
 Rather, the more meaningless variables there are, the more state space explosion occurs, causing the fuzzer to be overwhelmed by noise.
 
 Of the 40 variables extracted by CSFuzz, only 4 are meaningful to actual GC logic (precision 10.0\%).
-The remaining 36 are noise variables including:
-
-Compiler-generated variables: cleanup.dest.slot, ehselector.slot, exn.slot, and other exception handling internal variables
-ASan instrumentation byproducts: this.addr, plane\_address.addr, and other pointer addresses themselves
-Loop counters: repeat, repeat218, repeat243, and other loop control variables
+The remaining 36 are noise variables: compiler-generated exception-handling internals (\texttt{cleanup.dest.slot}, \texttt{ehselector.slot}, \texttt{exn.slot}), ASan instrumentation byproducts such as raw pointer addresses (\texttt{this.addr}, \texttt{plane\_address.addr}), and loop counters (\texttt{repeat}, \texttt{repeat218}, \texttt{repeat243}).
 
 In contrast, TVDA performs backward slicing based on threshold comparison patterns (free\_block\_pool\_size < threshold), extracting only variables that directly affect GC trigger conditions such as free block count and invalid page count.
 Similar patterns were observed in the FEMU environment.
 CSFuzz extracted 23 variables, but only 1 was valid (precision 4.3\%); many of the rest were duplicates or meaningless variables like \%cleanup.dest.slot.
-TVDA accurately identified 10 variables directly used in FEMU's GC decision logic like MQSim's, of which 5 were valid (precision 50.0\%).
+TVDA accurately identified 10 variables directly used in FEMU's GC decision logic, of which 5 were valid (precision 50.0\%).
 
 \subsubsection{Relationship with State Corpus Generation}
 
@@ -533,10 +529,9 @@ FragFuzz (TVDA+DRP) & 6 & 562.6 \\
 \end{table}
 
 While CSFuzz tracks 40 variables yet achieves only 65.4 State Corpus Adds, TVDA+DRP registered 562.6 states with only 6 variables.
-This suggests:
-
-CSFuzz's noise variables change frequently regardless of I/O, causing Adaptive Partitioning to judge them as ``already seen states'' and ignore them
-TVDA's critical variables change gradually according to actual I/O accumulation, and DRP accurately captures these subtle changes as new states
+This suggests two effects.
+First, CSFuzz's noise variables change frequently regardless of I/O, so Adaptive Partitioning treats them as ``already seen states'' and ignores them.
+Second, TVDA's critical variables change gradually with actual I/O accumulation, and DRP accurately captures these subtle changes as new states.
 
 TVDA showed 5 times higher precision than CSFuzz in MQSim (50\% vs 10\%) and 12 times higher in FEMU (50\% vs 4.3\%).
 The noise variables extracted by TVDA (block\_id, pageID, pgs\_per\_blk, etc.) are physical address variables where I/O operates.
@@ -558,12 +553,12 @@ The performance difference between DRP and Adaptive Partitioning was compared un
 Adaptive & 896,849 & 2,275,918 & 19.8 \\
 DRP & \textbf{729,759} & \textbf{1,757,289} & \textbf{562.6} \\
 \midrule
-Improvement & 18.6\%$\downarrow$ & 22.8\%$\downarrow$ & 28.4$\times$$\uparrow$ \\
+Improvement & 18.6\% fewer & 22.8\% fewer & 28.4$\times$ more \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-DRP reduced the number of commands until GC triggering by 18.6\% compared to Adaptive, with a particularly notable 28.4× difference in State Corpus generation.
+DRP reduced the number of commands until GC triggering by 18.6\% compared to Adaptive, with a particularly notable 28.4$\times$ difference in State Corpus generation.
 As analyzed in Section 4.C, this is because the Adaptive approach loses existing information when recalculating partitions during variable value drift, whereas DRP preserves the observed value range to maintain consistent sensitivity.
 
 \subsection{RQ4: Impact of FFM}
@@ -636,7 +631,7 @@ Additionally, proprietary firmware from commercial SSD manufacturers may use mor
 However, since the fundamental operating principle of FTLs—threshold-based maintenance operations—remains the same, we expect the core concept (State-Driven) of the proposed framework to be validly applicable to commercial firmware verification as well.
 
 Completeness of Variable Extraction (Internal Validity): Since TVDA relies on static analysis, there is a possibility of missing some threshold variables (false negatives) in cases involving pointer aliasing or complex indirect references.
-Additionally, as analyzed in Section 5.C, TVDA shows 50\% precision and includes some noise variables (physical address-related indices, configuration constants, etc.).
+Additionally, as analyzed in Section 5.D, TVDA shows 50\% precision and includes some noise variables (physical address-related indices, configuration constants, etc.).
 This demonstrates the limitation that static analysis alone cannot perfectly determine dynamic characteristics of variables (whether they change at runtime, frequency of changes).
 This can be improved in future work through combination with dynamic profiling to filter noise variables.
 
