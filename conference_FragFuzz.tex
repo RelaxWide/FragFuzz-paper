@@ -15,7 +15,6 @@
 \usepackage{etoolbox}
 \usepackage{array}
 \usepackage{booktabs}
-\newcolumntype{L}{>{\raggedright\arraybackslash}X}
 \newcommand{\dg}{\textsuperscript{\dag}}
 % Uniform, non-scaled table font for visual consistency across all tables
 \AtBeginEnvironment{tabular}{\footnotesize}
@@ -269,7 +268,7 @@ This strategy effectively eliminates such noise by combining domain-specific pat
 \centering
 \caption{Dependency Depth Analysis of Threshold Conditions}
 \label{tab:dependency_depth}
-\begin{tabularx}{\columnwidth}{@{}l l L c@{}}
+\begin{tabularx}{\columnwidth}{@{}l l X c@{}}
 \toprule
 \textbf{Platform} & \textbf{Logic} & \textbf{Critical Sink Condition} & \textbf{$k$} \\
 \midrule
@@ -476,7 +475,7 @@ The primary measurement metrics are as follows:
 \caption{GC Reach Efficiency Comparison in MQSim Environment (10-Trial Average)}
 \label{tab:mqsim_efficiency}
 \centering
-\begin{tabularx}{\columnwidth}{@{}Lrr@{}}
+\begin{tabularx}{\columnwidth}{@{}Xrr@{}}
 \toprule
 \textbf{Fuzzer} & \textbf{GC Trig.\,\#} & \textbf{GC Done\,\#} \\
 \midrule
@@ -517,7 +516,7 @@ This confirms that the relevant differentiator among fuzzers is not the final co
 \caption{Final Basic Block Coverage}
 \label{tab:coverage}
 \centering
-\begin{tabularx}{\columnwidth}{@{}l L r@{}}
+\begin{tabularx}{\columnwidth}{@{}l X r@{}}
 \toprule
 \textbf{Platform} & \textbf{Fuzzer} & \textbf{BB Coverage} \\
 \midrule
@@ -541,7 +540,7 @@ The core value of TVDA lies not in ``how many variables are extracted'' but in `
 \centering
 \caption{CSFuzz vs TVDA Variable Extraction Precision Comparison}
 \label{tab:precision}
-\begin{tabularx}{\columnwidth}{@{}l L c c c@{}}
+\begin{tabularx}{\columnwidth}{@{}l X c c c@{}}
 \toprule
 \textbf{Platform} & \textbf{Technique} & \textbf{Extracted} & \textbf{Valid} & \textbf{Precision} \\
 \midrule
@@ -576,7 +575,7 @@ TVDA accurately identified 10 variables directly used in FEMU's GC decision logi
 \centering
 \caption{State Corpus Generation Comparison (MQSim, 10-trial Average)}
 \label{tab:state_corpus}
-\begin{tabularx}{\columnwidth}{@{}Lcc@{}}
+\begin{tabularx}{\columnwidth}{@{}Xcc@{}}
 \toprule
 \textbf{Fuzzer} & \textbf{Tracked Vars} & \textbf{State Corpus Adds} \\
 \midrule
@@ -605,7 +604,7 @@ The performance difference between DRP and Adaptive Partitioning was compared un
 \centering
 \caption{Performance Comparison by Partitioning Technique (MQSim, 10-trial Average)}
 \label{tab:partitioning}
-\begin{tabularx}{\columnwidth}{@{}Lrrr@{}}
+\begin{tabularx}{\columnwidth}{@{}Xrrr@{}}
 \toprule
 \textbf{Partitioning} & \textbf{GC Trig.\,\#} & \textbf{GC Done\,\#} & \textbf{Corpus} \\
 \midrule
@@ -628,7 +627,7 @@ FEMU presents a higher nondeterminism environment than MQSim due to full-system 
 \caption{FFM Effectiveness in Nondeterministic FEMU Environment (3-Trial Average)}
 \label{tab:femu_ffm_effect}
 \centering
-\begin{tabularx}{\columnwidth}{@{}Lrr@{}}
+\begin{tabularx}{\columnwidth}{@{}Xrr@{}}
 \toprule
 \textbf{Configuration} & \textbf{GC Trig.\,\#} & \textbf{vs AFL++} \\
 \midrule
