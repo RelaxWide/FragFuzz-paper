@@ -1,0 +1,721 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage[table]{xcolor}
+\usepackage{tabularx}
+\usepackage{adjustbox}
+\usepackage{enumitem}
+\usepackage{etoolbox}
+\usepackage{array}
+\usepackage{booktabs}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\newcommand{\dg}{\textsuperscript{\dag}}
+% Uniform, non-scaled table font for visual consistency across all tables
+\AtBeginEnvironment{tabular}{\footnotesize}
+\AtBeginEnvironment{tabularx}{\footnotesize}
+\setlength{\tabcolsep}{3pt}
+% Tighter, less-indented lists
+\setlist[itemize]{leftmargin=1.4em, itemsep=1pt, topsep=2pt, parsep=0pt}
+\setlist[enumerate]{leftmargin=1.7em, itemsep=1pt, topsep=2pt, parsep=0pt}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{FragFuzz: Exploiting FTL Fragmentation to Trigger Deep Maintenance Logic in SSD Firmware}
+
+\author{Anonymous Author(s)}
+
+\maketitle
+
+\begin{abstract}
+Solid-state drives (SSDs) rely on complex firmware to manage internal operations such as garbage collection (GC), wear leveling, and flash translation layer (FTL) mapping.
+Defects in these maintenance routines are difficult to detect with conventional testing techniques, as they manifest only after prolonged operation when accumulated internal states reach critical thresholds.
+Coverage-guided fuzzing (CGF) tools such as AFL++ are effective at exploring code paths but remain state-unaware, discarding valuable inputs that incrementally progress toward threshold conditions without immediately increasing coverage.
+Existing state-aware fuzzing techniques assume discrete state transitions and thus fail to capture the gradual, fine-grained state changes inherent to SSD firmware.
+
+In this paper, we propose FragFuzz (FTL Fragmentation-driven Fuzzer), a greybox fuzzing framework that actively drives  SSD firmware toward worst-case fragmentation states to efficiently trigger deep maintenance logic.
+Our approach integrates three key techniques.
+First, Threshold-Variable Dependency Analysis (TVDA) automatically extracts critical variables governing GC trigger conditions through backward slicing on program dependency graph information.
+Second, Dynamic Range Partitioning (DRP) effectively tracks gradual variable changes while preserving coverage information under value drift.
+Third, FTL Fragmentation Metric (FFM) mitigates timing noise in nondeterministic environments by prioritizing inputs that intensify internal fragmentation.
+
+We evaluate FragFuzz on two complementary platforms: FEMU, a full-system emulation environment with high nondeterminism, and MQSim, a controlled high-fidelity simulation environment.
+Experimental results demonstrate that FragFuzz reaches GC trigger conditions with 52.5\% fewer commands and GC completion with 65.0\% fewer commands compared to AFL++, a state-of-the-art coverage-guided fuzzer.
+Furthermore, FragFuzz outperforms CSFuzz, a state-of-the-art state-aware fuzzer, by 28.8\% and 48.4\%, respectively.
+This work demonstrates that fragmentation, conventionally viewed as a performance problem, can serve as an effective stressor for systematically validating deep maintenance logic in SSD firmware.
+\end{abstract}
+
+\begin{IEEEkeywords}
+SSD Firmware, Greybox Fuzzing, Threshold Variable, Dynamic Range Partitioning, FTL Fragmentation
+\end{IEEEkeywords}
+
+\section{Introduction}
+From large-scale data centers to high-performance workstations, solid-state drives (SSDs) have become a core component of modern computing infrastructure.
+Modern SSDs rely on complex firmware to overcome the physical limitations of NAND flash memory, including the limited endurance inherent to NAND cell characteristics.
+This firmware internally manages complex maintenance operations such as the Flash Translation Layer (FTL), garbage collection (GC), and wear leveling.
+Defects in these internal logic components can lead to catastrophic data loss~\cite{narayanan2016ssd, han2021indepth}, data corruption, or severe performance degradation issues that often manifest only after prolonged operation, making firmware reliability assurance essential.
+
+The risks posed by firmware defects stemming from accumulated state have been repeatedly demonstrated through real-world commercial product incidents.
+Notably, in 2019, HPE issued an urgent warning~\cite{hpe-ssd-bulletin} about a critical defect in certain SAS SSD models that would simultaneously suffer permanent failure upon reaching exactly 32,768 hours of operation time due to an internal counter overflow, prompting the release of emergency firmware updates.
+
+Additionally, consumer high performance SSDs such as the Samsung 980 Pro and 990 Pro experienced issues~\cite{tomshw-samsung-ssd} where metadata processing logic errors caused drives to enter read-only mode or exhibit abnormally rapid health status degradation, necessitating firmware updates.
+These incidents demonstrate that firmware defects are not simple one time input errors but rather manifest only when long-term accumulated internal states and complex metadata management reach critical thresholds.
+
+However, SSD firmware verification remains challenging.
+Unit testing and random I/O generation fail to effectively detect complex state-dependent operations.
+Coverage-guided fuzzing (CGF) tools increase code coverage but encounter state-unaware limitations in SSD firmware.
+Maintenance routines such as GC operate on a threshold basis, triggering only upon accumulation of millions of I/O operations when valid page thresholds are reached.
+Conventional CGF focuses on state initialization and immediate coverage, failing to build long-term history.
+Furthermore, the nondeterminism caused by SSD channel parallelism and background scheduling introduces feedback noise, making bug reproduction difficult~\cite{chen2016internal, zhang2023excessive}.
+
+To address these challenges, recent research has attempted state-aware fuzzing by modeling protocol states~\cite{aflnet, stateafl}, tracking specific variables~\cite{statefuzz}, or annotating deep-state targets~\cite{ijon}.
+However, applying these approaches to SSD firmware faces two critical limitations.
+
+First, the simplicity of state definitions.
+Existing studies primarily assume explicit state transitions such as finite state machines (FSMs), but the internal state of SSDs comprises complex structures involving both hardware and software, such as valid page distribution (VPD) across thousands of blocks.
+Simple variable value changes cannot represent or induce complex structural states such as fragmentation, where mapping tables become increasingly disorganized.
+
+Second, the absence of feedback for gradual changes.
+State changes in SSDs are not immediate.
+Tens of thousands of I/O operations must accumulate before reaching threshold values.
+Existing fuzzers provide feedback only when states completely change or new branches are discovered, causing them to misjudge useful input sequences that incrementally worsen states toward thresholds as ``no change'' and discard them.
+
+Our framework integrates three key techniques.
+First, Threshold-Variable Dependency Analysis (TVDA) automatically extracts variables through backward slicing on target threshold logic.
+Second, Dynamic Range Partitioning (DRP) classifies state values with delta-based feedback, providing robustness across diverse firmware implementations.
+Third, FTL Fragmentation Metric (FFM) quantifies fragmentation severity and guides fuzzing toward worst-case states, including resource exhaustion and mapping table disorder, to efficiently trigger deep maintenance logic.
+
+We evaluate our proposed method on two distinct platforms: FEMU, a QEMU-based SSD emulator, and MQSim, a high-fidelity multi-queue SSD simulator.
+Experimental results demonstrate that FragFuzz reaches deep maintenance logic with 65.0\% fewer commands than state-of-the-art fuzzers such as AFL++, while covering approximately 99\% of the manually curated I/O-related basic blocks.
+Furthermore, we successfully induce deep state transitions encompassing not only GC triggers but also subsequent maintenance routines.
+
+The main contributions of this paper are as follows:
+\begin{enumerate}
+    \item \textbf{Automated State Sensitivity:} TVDA and DRP enable efficient exploration through automatic extraction of critical variables and dynamic adaptation without manual configuration.
+    \item \textbf{Robustness to Nondeterminism:} FFM provides stable feedback in nondeterministic environments by prioritizing inputs that drive firmware toward resource-exhausted states.
+    \item \textbf{FTL Fragmentation Metric:} Fragmentation metrics including VPD serve as optimization targets for extreme testing of GC and metadata logic.
+    \item \textbf{Comprehensive Evaluation:} We demonstrate a 65.0\% reduction in the number of commands required to reach deep maintenance logic compared to AFL++ on FEMU and MQSim, while attaining near-complete (approximately 99\%) coverage of the manually curated I/O-related basic blocks, along with efficient deep-state reachability.
+\end{enumerate}
+
+\section{Background and Motivation}
+This section analyzes the specific characteristics of SSD firmware and the limitations of Coverage-Guided Fuzzing (CGF), and discusses the necessity of state-driven fuzzing approaches.
+
+\subsection{SSD Threshold-Based Operations}
+SSD controller firmware maps logical addresses to physical addresses through the Flash Translation Layer (FTL) and manages the out-of-place update nature of NAND flash.
+Maintenance routines such as Garbage Collection (GC), wear leveling, and Bad Block Management (BBM) are critical to firmware reliability.
+These routines operate on a threshold basis.
+GC is triggered upon accumulation of invalid pages or exhaustion of free blocks, while wear leveling executes when the erase count deviation among blocks exceeds a threshold.
+In other words, verification requires reaching deep states through the accumulation of millions of I/O operations rather than single I/O commands.
+
+\subsection{Limitations of CGF in SSD Testing}
+Coverage-guided fuzzers (CGF) such as AFL~\cite{afl}, AFL++~\cite{aflpp} consider inputs that increase code coverage as ``interesting,'' saving and mutating them.
+However, two limitations arise in SSD firmware testing.
+First, insensitivity to state changes.
+CGF discards inputs that do not immediately increase coverage, causing the loss of accumulated I/O needed to reach thresholds and resulting in coverage plateaus or inefficient repeated exploration of shallow states.
+Second, nondeterministic I/O.
+Due to logical-to-physical address mapping states, multi-channel and queuing mechanisms, and background operations, SSDs may execute different code paths for identical input sequences depending on internal state at execution time.
+This confuses the fuzzer's ability to identify interesting seeds and degrades reproducibility.
+
+\subsection{FTL Fragmentation and State Complexity}
+In SSD firmware, fragmentation can be defined as a critical state that maximizes the logical complexity of firmware, beyond being a simple indicator of storage performance degradation.
+FTL fragmentation refers to a state where valid pages are irregularly distributed across physical blocks, exerting the following significant effects on firmware behavior.
+ \paragraph{Control Flow Complexity} In low-fragmentation states (e.g., immediately after formatting), the FTL performs only simple mapping updates.
+In contrast, highly fragmented states (high entropy) require the FTL to perform cost-benefit analysis for victim block selection, valid page migration, and multiple merge operations on mapping tables.
+During this process, exception handling routines and complex conditional statements that are not normally executed become activated.
+\paragraph{Potential for Race Conditions} Fragmentation forcibly extends the execution time of background operations.
+In highly fragmented states where GC must run for extended periods, the probability of resource contention between host I/O requests and background operations increases significantly.
+Thus, fragmented states become an essential precondition for verifying the firmware's concurrency control logic.
+\paragraph{State Barrier} Under typical workloads, SSD firmware actively attempts to resolve fragmentation (defragmentation).
+Consequently, random I/O alone makes it difficult to reach worst-case fragmentation states that the firmware cannot efficiently handle.
+This implies that the target states fuzzing must reach are hidden behind a ``state barrier'' that does not naturally occur.
+Therefore, to trigger deep states in SSD firmware, a strategy is essential that does not simply send large volumes of I/O, but intentionally maximizes FTL fragmentation metrics to drive the firmware through extreme computational loads and complex state transitions.
+
+\section{Related Works}
+This section reviews existing research on SSD firmware verification, covering fuzzing techniques, validation platforms, and FTL fragmentation studies, and positions our state-driven approach within this landscape.
+
+\subsection{Evolution of Fuzzing Techniques and State-Aware Approaches}
+Fuzzing has established itself as a standard technique for software vulnerability detection, yet reveals clear limitations when verifying stateful systems such as SSD firmware.
+
+\subsubsection*{Coverage-Guided Fuzzing (CGF).} Tools such as AFL~\cite{afl} and AFL++~\cite{aflpp} effectively explore code paths through edge coverage tracking but remain fundamentally state-unaware.
+In SSD firmware, GC triggers only when internal variables such as free block count fall below thresholds after millions of I/O operations.
+CGF cannot perceive this state accumulation, leading to coverage plateaus where fuzzers repeatedly explore shallow paths indefinitely.
+
+\subsubsection*{State-Aware Fuzzing.} To address these challenges, recent research has explored state-aware fuzzing through protocol-specific modeling~\cite{aflnet, stateafl}, variable tracking methods~\cite{statefuzz}, and annotation-based deep-state exploration~\cite{ijon}.
+However, directly applying these techniques to SSD firmware remains insufficient.
+Most recent works focus on host-side driver states or explicit state transitions.
+For instance, annotation-based approaches such as IJON~\cite{ijon} require manual expert insight to expose deep states, which does not scale to the thousands of internal variables in SSD firmware.
+They fail to account for the threshold-based internal states of SSDs, such as invalid page accumulation for GC triggers, which require continuous I/O sequences rather than discrete state changes.
+
+\subsubsection*{Directed Greybox Fuzzing (DGF).} Techniques such as AFLGo~\cite{aflgo} guide fuzzing toward target code locations based on CFG distance.
+However, for deep state logic, the objective is accumulating state distance through I/O operations, rather than reducing code distance.
+DGF cannot understand this data causality, making it ineffective for SSD firmware verification.
+
+\subsection{Firmware Validation Platforms}
+SSD firmware validation requires balancing hardware fidelity with software visibility.
+Modern simulators such as MQSim~\cite{mqsim} have significantly narrowed the reality gap through detailed NVMe protocol modeling, while recent data-driven calibration that trains a deep neural network on paired simulator/device execution profiles~\cite{lee} reduces simulation error to approximately 3\%.
+In contrast, hardware platforms like OpenSSD~\cite{openssd, cosmosplus} suffer from state opacity—real-time variable tracking via JTAG or UART causes probe effects that can mask timing-sensitive cases, while repetitive stress testing accelerates physical wearout.
+This research adopts a dual platform strategy using FEMU~\cite{femu} and MQSim complementarily.
+FEMU provides full system emulation with realistic host-device interactions, while MQSim offers precise internal timing and resource contention modeling.
+This cross-validation ensures generalizability across different simulation environments.
+
+\subsection{Analysis and Control of SSD Nondeterminism}
+SSD parallel processing and asynchronous background operations induce I/O nondeterminism.
+Performance-oriented research such as IODA~\cite{ioda} suppresses nondeterminism for QoS, but this blocks opportunities for race conditions to manifest.
+State Data-Aware Fuzzing~\cite{statedataaware} passively follows state transitions without forcing complex contention states.
+In contrast, FragFuzz actively modulates nondeterminism by manipulating fragmentation states to maximize collision probability between host I/O and internal operations.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth, height=0.3\textheight, keepaspectratio]{fig1.png}
+\caption{Overall architecture of FragFuzz.
+Phase 1 performs automated variable discovery through TVDA, extracting threshold-related variables via pattern matching and $K$-hop backward slicing on the Program Dependency Graph.
+Phase 2 executes the state-driven fragmentation fuzzing loop, where the DRP-based monitor tracks gradual state changes and the FFM-guided scheduler prioritizes inputs that intensify internal fragmentation.}
+\label{fig:framework}
+\end{figure*}
+
+\subsection{SSD Fragmentation and Reliability Studies}
+SSD fragmentation has been treated as a core issue directly affecting internal FTL (Flash Translation Layer) mapping efficiency and lifespan, beyond the file system level.
+Traditional research has focused primarily on identifying fragmentation as a cause of performance degradation.
+
+The recent study ``We Ain't Afraid of No File Fragmentation''~\cite{jun2024we} experimentally proved that parallelism conflicts among multiple dies within SSDs are the primary cause of fragmentation-induced performance degradation, while SSD-iq~\cite{haas2025ssd} quantitatively modeled the impact of fragmentation on internal queuing latency and write amplification factor (WAF).
+Prior demand-based FTL research~\cite{dftl} demonstrated that efficient mapping table management significantly impacts GC overhead, as scattered mappings increase valid page migration costs.
+
+However, these studies have the limitation of viewing fragmentation only as a problem to solve.
+From a reliability verification perspective, pushing the system outside normal bounds is important.
+As fragmentation intensifies, firmware must reorganize metadata and perform GC more aggressively to secure scarce free blocks, during which complex concurrency control logic executes.
+Existing research analyzed the impact of fragmentation on performance but lacked attempts to utilize fragmentation as an attack vector for verifying firmware's extreme situation response capability.
+This research reverses this conventional perspective.
+We utilize fragmentation metrics not as targets to optimize, but rather as objective functions for fuzzing that should be maximized.
+This approach intentionally drives firmware to worst-case resource states, effectively exposing hidden resource exhaustion bugs and race conditions that do not manifest under typical workloads.
+
+\subsection{Advanced Automated Testing Techniques}
+As software complexity increases, advanced automation techniques combining machine learning or static analysis beyond simple random testing have been proposed.
+While synthetic workload generators (Fio~\cite{fio}, Vdbench~\cite{berryman2010vdbench}) and learning-based approaches~\cite{lin2022gan} are effective for performance benchmarking, they remain black-box methods unaware of firmware internal state.
+
+GRAFT~\cite{graft} introduces reinforcement learning to SSD firmware testing by modeling firmware control flow as a graph and providing rewards when agents explore new code blocks.
+However, GRAFT employs offline RL, requiring extensive pre-training on pre-collected execution traces before deployment.
+Additionally, reward sparsity in SSD environments, where core logic executes only after hundreds of thousands of I/O operations, causes agents to remain in shallow path exploration without learning to reach deep states.
+
+CSFuzz~\cite{csfuzz} is a general-purpose directed fuzzing technique that identifies critical variables in programs through static analysis and guides fuzzing by tracking changes in these variable values.
+This represents an advancement by considering data flow in addition to code coverage, and its effectiveness has been demonstrated across various open-source projects.
+However, applying it directly to SSD firmware raises state change granularity issues.
+CSFuzz's adaptive range partitioning algorithm is effective for typical program variables, but is too coarse to handle variables that change finely across ranges of tens of thousands, such as SSD fragmentation indices or free block counts.
+Consequently, there is significant risk of missing important fine-grained state changes just before reaching thresholds.
+
+This research accepts the advantages of such prior work while proposing TVDA (Threshold Variable Dependency Analysis), DRP (Dynamic Range Partitioning), and FTL Fragmentation Metric (FFM) techniques that consider SSD domain specificity.
+We eliminate reward gaps by providing more immediate state feedback and capture even subtle state changes through dynamic range partitioning, thereby efficiently verifying firmware's specific threshold-based logic.
+
+\section{Proposed Methodology}
+This section presents FragFuzz (FTL Fragmentation-driven Fuzzer) for maintenance logic verification of SSD firmware.
+As illustrated in Figure 1, the overall methodology of FragFuzz consists of two major phases: Phase 1: Automated Variable Discovery \& Instrumentation, and Phase 2: State-Driven Fragmentation Fuzzing Loop.
+
+\subsection{Framework Overview}
+\subsubsection*{Phase 1: Automated Variable Discovery \& Instrumentation}
+
+This phase is a static analysis process that automatically identifies and prepares the threshold related state variables to be monitored within the firmware before fuzzing is performed.
+While SSD firmware contains thousands of global variables, only a small fraction govern critical maintenance logic such as GC.
+Phase 1 employs the TVDA (Threshold Variable Dependency Analysis) technique to discover these threshold-related variables without human intervention.
+Specifically, after identifying entry conditions (e.g., if val $<$ TH) of target functions through pattern matching, $K$-hop backward slicing based on the Program Dependency Graph (PDG)~\cite{horwitz_pdg} is performed to trace the dependency chains of variables affecting those conditions.
+The finally extracted variables are instrumented into the firmware binary and mapped to shared memory.
+
+\subsubsection*{Phase 2: State-Driven Fragmentation Fuzzing Loop}
+
+During the runtime phase where instrumented firmware executes, fuzzing efficiency is maximized through real-time state feedback.
+The core of this phase is the DRP (Dynamic Range Partitioning) algorithm.
+Unlike existing techniques that use fixed ranges or simple adaptive methods and miss subtle state changes in SSDs, DRP dynamically recalibrates observation ranges based on statistics of variable change amounts (deltas).
+The fuzzing loop iteratively updates the dual corpus (Edge/State Corpus) based on state change information detected by the monitor, while the scheduler selects and executes optimal I/O seeds that can intensify the current fragmentation level.
+Through this process, FragFuzz eliminates the inefficiency of random exploration and intentionally creates worst-case fragmentation states to discover threshold-related firmware logic defects.
+
+\subsection{Threshold-Variable Dependency Analysis (TVDA)}
+The core maintenance routines of SSD firmware execute only when specific internal variables reach threshold values.
+Therefore, identifying and monitoring these variables is the first step in state-driven fuzzing.
+This research proposes TVDA (Threshold-Variable Dependency Analysis), a static analysis-based technique to automatically extract threshold-related variables without domain knowledge, as illustrated in Figure 2. TVDA is performed in the following four steps as depicted in Figure 1 (Phase 1).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth, keepaspectratio]{fig2.png}
+\caption{Threshold-Variable Dependency Analysis (TVDA) workflow.
+Starting from a target function (e.g., \texttt{GC\_Trigger}), TVDA identifies critical sinks through empirical pattern matching on threshold-related naming conventions, then performs $K$-hop backward slicing on the PDG to extract variables that influence the trigger condition.}
+\label{fig:tvda}
+\end{figure}
+
+\subsubsection*{Step 1: Target Function Selection}
+
+The starting point of analysis is selecting the core target function that the user wishes to verify.
+
+\subsubsection*{Step 2: Critical Sink Identification via Empirical Analysis}
+
+TVDA combines structural analysis and empirical pattern matching to identify entry conditions (Critical Sinks) of target functions.
+First, the analyzer traverses the control flow graph (CFG) of the target function at the LLVM IR level, detecting comparison instructions (icmp or switch) that branch execution flow.
+At this point, operands compared against constants are extracted as potential state variable candidates.
+Subsequently, filtering based on variable naming conventions is performed to precisely select actual threshold variables from the collected candidates.
+
+Based on a recent survey of SSD simulators and emulators~\cite{gheibi2025survey}, we examined five major open-source emulator and simulator platforms that accurately reproduce actual SSD firmware behavior: FEMU~\cite{femu}, MQSim~\cite{mqsim}, ZNS+~\cite{znsplus}, NVMeVirt~\cite{nvmevirt}, and ConfZNS~\cite{confzns}.
+Across all of these platforms, the threshold variables that gate core maintenance logic---such as GC triggering, must-GC, wear leveling, thermal throttling, and lifespan management---consistently follow a small set of naming conventions, sharing keywords such as \texttt{thres}, \texttt{limit}, and \texttt{bound} (for example, FEMU's \texttt{gc\_thres\_lines} and MQSim's \texttt{GC\_Exec\_Threshold}).
+This empirical regularity is precisely what allows TVDA to remain fully automated: instead of relying on hand-crafted, per-platform variable lists, it exploits these recurring naming patterns as a lightweight, platform-agnostic filter.
+
+TVDA applies these empirically verified patterns to icmp instruction analysis, finalizing variables that structurally correspond to comparison statements while simultaneously satisfying domain naming conventions as Critical Sinks.
+Since SSD firmware contains tens of thousands of general branches, simple structural analysis alone would result in mass extraction of meaningless variables.
+This strategy effectively eliminates such noise by combining domain-specific patterns, precisely targeting only true positive threshold variables that govern the firmware's core maintenance logic.
+
+\begin{table}[t]
+\centering
+\caption{Dependency Depth Analysis of Threshold Conditions}
+\label{tab:dependency_depth}
+\begin{tabularx}{\columnwidth}{@{}l l L c@{}}
+\toprule
+\textbf{Platform} & \textbf{Logic} & \textbf{Critical Sink Condition} & \textbf{$k$} \\
+\midrule
+\multirow{3}{*}{FEMU} & GC Trigger & \texttt{free\_line\_cnt <= thres} & \cellcolor{gray!20}\textbf{5} \\
+ & Must-GC & \texttt{free\_line\_cnt <= thres\_high} & \cellcolor{gray!20}\textbf{5} \\
+ & Victim Sel. & \texttt{victim->ipc < pgs/8} & \cellcolor{gray!20}\textbf{3} \\
+\midrule
+\multirow{2}{*}{NVMeVirt~\cite{nvmevirt}} & GC Trigger & \texttt{free\_line\_cnt <= thres} & \cellcolor{gray!20}\textbf{5} \\
+ & Write Credit & \texttt{write\_credits <= 0} & \cellcolor{gray!20}\textbf{4} \\
+\midrule
+\multirow{2}{*}{MQSim} & GC Trigger & \texttt{free\_blk\_pool < thres} & \cellcolor{gray!20}\textbf{5} \\
+ & Static WL & \texttt{erase\_diff >= wl\_thres} & \cellcolor{gray!20}\textbf{4} \\
+\midrule
+\multirow{2}{*}{VSSIM~\cite{vssim}} & GC Trigger & \texttt{empty\_blk\_nb <= thres} & \cellcolor{gray!20}\textbf{5} \\
+ & Seq. Detect & \texttt{length >= SEQ\_THRES} & \cellcolor{gray!20}\textbf{3} \\
+\midrule
+\multirow{2}{*}{SimpleSSD~\cite{simplessd}} & GC Trigger & \texttt{freeBlkRatio() < thres} & \cellcolor{gray!20}\textbf{5} \\
+ & Cost-Benefit & \texttt{validCnt + time\_factor} & \cellcolor{gray!20}\textbf{4} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection*{Step 3: K-hop Backward Slicing}
+
+The identified threshold variables are important in themselves, but they may be the computational results of multiple base variables.
+Therefore, to find the sources of change that the fuzzer can directly control, TVDA performs backward slicing based on the Program Dependency Graph (PDG)~\cite{horwitz_pdg}.
+The most important parameter here is the search depth (Hop Depth, K).
+We analyzed the data dependency depths of major FTL implementations to determine the optimal K value, with results shown in Table~\ref{tab:dependency_depth}. The analysis confirmed that most core logic such as GC Trigger and Wear-Leveling has a maximum dependency distance of 5 hops from the threshold point.
+This consistency stems from the hierarchical data management structure inherent to SSD FTLs.
+From I/O request processing to final reflection in global resource state, there are typically five abstraction layers (Request → Page → Block → Line/Superblock → Global Resource).
+For example, the should\_gc() functions in FEMU and NVMeVirt~\cite{nvmevirt}, and the GC Condition Check logic in MQSim, are all located at the end of this 5-stage data flow.
+In contrast, localized logic such as wear leveling or victim block selection showed shorter dependency distances of 3-4 hops.
+Therefore, we set k=5 as the backward slicing search depth, representing the minimum sufficient condition to encompass all core maintenance logic.
+Therefore, we selected $K=5$ not merely as an empirical value but as a parameter reflecting the five-layer hierarchical structure of FTL architecture.
+Based on this empirical evidence, this research set the TVDA slicing depth to K=5, securing both analysis efficiency and accuracy.
+
+\subsubsection*{Step 4: Instrumentation}
+The final extracted variable list is instrumented at compile time and monitored at runtime through shared memory with minimal overhead.
+
+\subsection{Dynamic Range Partitioning (DRP)}
+Once variables to monitor have been selected through TVDA, the next challenge is how to interpret changes in those variables at runtime.
+This research proposes the Dynamic Range Partitioning (DRP) algorithm to capture the continuous and subtle state changes of SSDs.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth, keepaspectratio]{fig3.png}
+\caption{Comparison of partitioning strategies for state variable tracking. (a) Fixed Partitioning: Large fixed-size buckets mask meaningful changes. (b) Adaptive Partitioning: Sensitivity degrades exponentially as values drift from initial values, creating blind spots near critical thresholds. (c) DRP: Maintains consistent sensitivity across all value ranges by dynamically recalibrating partition sizes based on observed delta statistics.}
+\label{fig:drp}
+\end{figure}
+
+ \paragraph{Limitations of Existing Approaches}
+Figure 3 illustrates the limitations of existing partitioning strategies compared to DRP.
+
+\subparagraph{Fixed Partitioning~\cite{afl}:} Divides variable ranges into fixed sizes (e.g., $2^n$ buckets).
+However, the delta of SSD state variables is often negligible relative to their large dynamic ranges.
+As shown in the figure, even when a meaningful change of Delta=1,000 occurs in a situation where partition size is fixed at 8,192, this is treated as noise within the same partition (masked) and not conveyed to the fuzzer.
+
+\subparagraph{Adaptive Range Partitioning~\cite{csfuzz}:} Expands partitions by $2^n$ based on initial values.
+This approach is sensitive initially, but as variable values drift farther from initial values, partition ranges expand exponentially.
+Consequently, sensitivity drastically decreases in the ``Low Boundary'' region (e.g., just before free block exhaustion) during late testing stages, forming a ``blind spot'' that misses the most important subtle changes just before threshold values.
+
+\subparagraph{Dynamic Range Partitioning (DRP):}
+DRP addresses these challenges by periodically recalibrating partition sizes based on the statistical distribution of observed state changes (deltas).
+The operating principle consists of two key phases.
+
+\noindent\textbf{Delta Tracking.} During the fuzzing loop, the Monitor records the magnitude of change, $\delta = |v_{\text{curr}} - v_{\text{last}}|$, in a sliding window buffer $H$.
+
+\noindent\textbf{Dynamic Resizing.} The partition size $S$ is initialized once sufficient samples accumulate and is recalibrated whenever significant drift is detected.
+The new partition size is calculated as:
+
+\begin{equation}
+\label{eq:drp_sizing}
+S = \alpha \cdot \text{Median}(H) + (1-\alpha) \cdot P_{75}(H)
+\end{equation}
+
+\noindent where $\alpha$ is a weighting coefficient.
+We set $\alpha = 0.7$ to allocate 70\% weight to the typical change magnitude (Median) for stability, while assigning 30\% to the upper quartile ($P_{75}$) to accommodate exceptional variability.
+This approach ensures DRP remains robust against temporary noise while flexibly adapting to meaningful trends.
+Consequently, as shown in the bottom graph of Figure 3, DRP maintains consistent sensitivity across the entire test interval, continuously tracking the gradual state accumulation process without interruption.
+
+\begin{algorithm}[t]
+\caption{Dynamic Range Partitioning (DRP)}
+\label{alg:drp}
+\begin{algorithmic}[1]
+\REQUIRE $v_{\text{curr}}$ (Current variable value), $\mathcal{C}$ (Set of covered ranges)
+\STATE \textbf{Persistent:} $S$ (Partition size), $H$ (Delta history window), $v_{\text{last}}$
+\ENSURE \textbf{True} if a new state is found, else \textbf{False}
+
+\STATE $\delta \leftarrow |v_{\text{curr}} - v_{\text{last}}|$
+\STATE Update sliding window $H$ with $\delta$
+
+\STATE \textit{// Phase 1: Adaptive Sizing (Initialization \& Recalibration)}
+\IF{$S = \emptyset$ \textbf{or} IsDrifting($H, \delta$)}
+    \IF{$|H| \geq \text{MIN\_SAMPLES}$}
+        \STATE $S \leftarrow \alpha \cdot \text{Median}(H) + (1-\alpha) \cdot P_{75}(H)$
+    \ENDIF
+\ENDIF
+
+\STATE \textit{// Phase 2: Range Mapping \& Coverage Check}
+\IF{$S \neq \emptyset$}
+    \STATE $r_{\text{new}} \leftarrow \lfloor v_{\text{curr}} / S \rfloor$
+    \IF{$r_{\text{new}} \notin \mathcal{C}$}
+        \STATE $\mathcal{C} \leftarrow \mathcal{C} \cup \{r_{\text{new}}\}$
+        \STATE MergeAdjacentRanges($\mathcal{C}$) \COMMENT{Prevent state explosion}
+        \RETURN \textbf{True}
+    \ENDIF
+\ENDIF
+
+\RETURN \textbf{False}
+\end{algorithmic}
+\end{algorithm}
+
+Algorithm~\ref{alg:drp} outlines the procedure.
+Upon each I/O execution, the algorithm updates the delta history and checks whether the partition size $S$ requires initialization or recalibration (Phase 1).
+If a drift is detected, $S$ is updated using Eq.~\ref{eq:drp_sizing}.
+Finally, the current value is mapped to a partition index $r_{\text{new}}$.
+If this index represents a previously unvisited range, the algorithm updates the coverage set $\mathcal{C}$ and signals a "New State" to the fuzzer (Phase 2).
+
+\subsection{Mitigating I/O Nondeterminism via FTL Fragmentation Metric}
+The internal parallelism and asynchronous background operations of SSDs induce execution path nondeterminism.
+Coverage feedback can vary for identical inputs depending on scheduling timing, causing confusion (noise) for the fuzzer in selecting valid seeds.
+This research mitigates this problem by utilizing the FTL Fragmentation Metric (FFM), which quantifies fragmentation state, as both a noise filter and state anchor.
+FFM is a composite metric designed to quantify the most challenging states for SSD firmware to handle.
+We identified three key factors that determine firmware maintenance load, instrumenting them in real-time within the FTL and transmitting them to the fuzzer through shared memory.
+All metrics are normalized to a 0-1000 scale, where higher values indicate more severe fragmentation.
+ \paragraph{Invalidation Ratio}
+The ratio of invalidations occurring relative to total write requests.
+While WAF (Write Amplification Factor) is commonly used for fragmentation measurement, in emulator environments, WAF values remain at 1 until GC is actually triggered.
+Therefore, this research adopted Invalidation Ratio as an alternative metric that can track fragmentation progress even before GC trigger.
+As overwrites become more frequent, existing pages are invalidated and become GC targets, so this ratio can proactively capture latent fragmentation states just before WAF rises.
+ \paragraph{Block VPC Variance}
+The variance of Valid Page Count (VPC) held by each physical block.
+GC efficiency depends on finding ``victim blocks'' with few valid pages.
+When variance is low, all blocks have similar numbers of valid pages, making victim block selection difficult and resulting in worst-case efficiency as many valid pages must be copied during GC.
+ \paragraph{L2P Mapping Entropy}
+Measures how randomly distributed the mapping from logical to physical addresses is using information entropy.
+Sequential writes generate low entropy, while random overwrites generate high entropy.
+High entropy means mapping table locality is destroyed, degrading cache efficiency and complicating valid page tracking during GC.
+
+The final FFM score is calculated as the equally weighted average of the three metrics.
+Equal weights were used to prevent arbitrary bias toward specific metrics.
+Each metric captures different aspects of fragmentation, and which metric is more important can vary depending on workload characteristics.
+Equal weighting is a robust choice under such uncertainty.
+
+The three defined FFM metrics are integrated as tracking targets for the DRP algorithm along with variables extracted by TVDA.
+Through this, not only variables directly involved in GC threshold conditions, but also gradual changes in fragmentation state are tracked as part of state coverage.
+The fuzzer considers both edge coverage changes and increases in DRP ranges of FFM metrics to distinguish state transitions.
+By adding seeds to the State Corpus only when one or more FFM metrics reach higher severity ranges, effective input sequences that intensify fragmentation can be preferentially selected even in nondeterministic environments.
+
+\section{Evaluation}
+\begin{itemize}
+    \item \textbf{RQ1 (Efficiency):} How much faster does FragFuzz reach maintenance logic GC compared to existing fuzzers?
+    \item \textbf{RQ2 (Analysis):} How does TVDA-based variable selection affect the efficiency of state tracking?
+    \item \textbf{RQ3 (Partitioning):} What advantages does DRP (Dynamic Range Partitioning) provide?
+    \item \textbf{RQ4 (Robustness):} Does the FFM-based fragmentation metric contribute to nondeterminism mitigation?
+\end{itemize}
+
+\subsection{Experimental Setup}
+\subsubsection{Target Firmware and Platforms}
+This research validated generalizability by evaluating the proposed techniques on two distinct SSD simulation platforms.
+Since each platform has different abstraction levels and operational characteristics, measurable metrics and evaluation focuses differ accordingly.
+
+\textbf{MQSim~\cite{mqsim}:} A simulator that precisely models the multi-queue/multi-chip architecture of modern NVMe SSDs, with strengths in internal timing modeling and resource contention simulation.
+In particular, it accurately reflects the impact of actual I/O workloads on GC execution even after GC triggering, enabling meaningful measurement of both GC Trigger and GC Done timings.
+However, due to simulator characteristics, PPA (Physical Page Address) and WAF (Write Amplification Factor) show fixed patterns, resulting in low discriminative power of FFM metrics.
+Thus, MQSim is primarily used to evaluate GC reach efficiency and DRP performance.
+
+\textbf{FEMU~\cite{femu}:} A QEMU-based full-system NVMe SSD emulator that interacts with actual Linux kernel NVMe drivers, enabling verification of the complete host-device I/O stack.
+Due to full-system emulation, it presents a higher nondeterminism environment compared to MQSim.
+GC Trigger can be measured, but GC is implemented to be processed immediately after triggering, making GC Done measurement unavailable.
+Instead, FTL internal states (Invalidation Ratio, VPC Variance, L2P Entropy) can be extracted in real-time.
+Thus, FEMU is primarily used to evaluate nondeterminism mitigation and FFM effectiveness.
+
+In summary, the two platforms complement each other: MQSim enables precise GC completion analysis in a controlled environment, while FEMU provides realistic nondeterministic conditions with full FFM metric support.
+
+\subsubsection{Baselines}
+\begin{itemize}
+\item \textbf{Random Fuzzer:} Performs random parameter input for I/O (Write/Read) operations.
+\item \textbf{AFL++:} The representative state-of-the-art coverage-guided fuzzing tool, serving as a pure CGF baseline without state-aware capabilities.
+\item \textbf{State-Data Aware Fuzzer:} A state-data-aware SSD firmware fuzzer utilizing replay through Case-Based Reasoning.
+\item \textbf{GRAFT:} An SSD firmware testing tool using graph reinforcement learning (RL), evaluated in its modified MQSim (Samsung) environment with offline pre-training.
+\item \textbf{CSFuzz:} A state-of-the-art state-aware fuzzer that identifies critical variables through static analysis and tracks states using Adaptive Partitioning.
+\item \textbf{FragFuzz (TVDA+Adaptive):} A configuration combining the proposed TVDA-based variable extraction with existing Adaptive Partitioning.
+\item \textbf{FragFuzz (TVDA+DRP):} A configuration combining TVDA with the proposed Dynamic Range Partitioning.
+\item \textbf{FragFuzz (TVDA+DRP+FFM):} The final configuration adding fragmentation metrics (FFM) to DRP.
+\end{itemize}
+
+\subsubsection{Experimental Settings}
+Due to the inherent randomness of fuzzing, repeated experiments were conducted for each configuration (MQSim: 10 trials, FEMU: 3 trials).
+We adopt the number of I/O commands, rather than wall-clock time, as the primary deterministic metric to strictly evaluate algorithmic efficiency independent of hardware throughput.
+
+The primary measurement metrics are as follows:
+
+\begin{itemize}
+\item \textbf{Code Coverage:} Basic Block coverage
+\item \textbf{GC Trigger CMD \#:} Number of I/O commands required until GC is first triggered
+\item \textbf{GC Done CMD \#:} Total number of I/O commands required until GC completion (MQSim only)
+\item \textbf{State Corpus Adds:} Number of seeds added to State Corpus due to state changes
+\end{itemize}
+
+\subsection{RQ1: Efficiency of Reaching Deep Logic}
+
+\begin{table}[t]
+\caption{GC Reach Efficiency Comparison in MQSim Environment (10-Trial Average)}
+\label{tab:mqsim_efficiency}
+\centering
+\begin{tabularx}{\columnwidth}{@{}Lrr@{}}
+\toprule
+\textbf{Fuzzer} & \textbf{GC Trig.\,\#} & \textbf{GC Done\,\#} \\
+\midrule
+AFL++ & 1,535,575 & 5,017,839 \\
+State-Data Aware & 1,142,856 & 3,892,145 \\
+GRAFT\dg & 600,156 & -- \\
+CSFuzz & 1,025,526 & 3,404,542 \\
+\midrule
+FragFuzz (TVDA+Adaptive) & 896,849 & 2,275,918 \\
+FragFuzz (TVDA+DRP) & \textbf{729,759} & \textbf{1,757,289} \\
+\bottomrule
+\end{tabularx}
+
+\vspace{2pt}
+{\scriptsize \dg\,GRAFT was run in a modified MQSim (32\,GB device) with offline RL pre-training; GC completion was not reported.}
+\end{table}
+
+FragFuzz (TVDA+DRP) required an average of only 729,759 commands to trigger GC, reaching the target with 52.5\% fewer commands than AFL++ and 28.8\% fewer commands than CSFuzz.
+For total commands until GC completion, reductions of 65.0\% compared to AFL++ and 48.4\% compared to CSFuzz were achieved.
+This demonstrates that DRP-based precise state tracking accelerates threshold attainment.
+Although the learning-based GRAFT reaches GC in fewer raw commands (600,156), this figure is obtained in a modified simulator with a larger device and costly offline pre-training; on the standard MQSim, FragFuzz attains comparable efficiency without any pre-training while additionally tracking GC completion.
+Meanwhile, during the deep logic reaching process, one request omission defect was discovered in FEMU's I/O error handling path.
+This defect caused the host to wait indefinitely and leak resources because requests were not enqueued to the completion queue when errors occurred.
+However, no other defects attributable to firmware flaws were found, which is judged to be because the evaluation targets are mature codebases that have been used for extended periods.
+Therefore, this research does not address bug discovery count as a separate RQ, focusing evaluation on deep logic reach efficiency improvement.
+
+\subsection{Coverage Analysis}
+Table~\ref{tab:coverage} reports the final Basic Block (BB) coverage achieved on both platforms.
+We observe that absolute BB coverage saturates at similar levels across all fuzzers (approximately 38\% on MQSim and 54\% on FEMU).
+This is because the majority of the firmware codebase consists of logic unrelated to the I/O datapath, such as initialization, NVMe administrative command handling, error paths, and debugging routines, which are not exercised by I/O workloads regardless of the fuzzing strategy.
+Consequently, absolute BB coverage alone is not a discriminating metric for datapath exploration.
+
+To assess exploration of the maintenance datapath specifically, we manually curated the subset of basic blocks belonging to the I/O write/read and GC datapath.
+Over this curated I/O-related subset, FragFuzz reaches approximately 99\% coverage, indicating near-complete exploration of the datapath logic that governs deep maintenance behavior.
+This confirms that the relevant differentiator among fuzzers is not the final coverage plateau but the number of commands required to reach the deep maintenance logic, which is the primary metric adopted throughout this evaluation.
+
+\begin{table}[t]
+\caption{Final Basic Block Coverage}
+\label{tab:coverage}
+\centering
+\begin{tabularx}{\columnwidth}{@{}l L r@{}}
+\toprule
+\textbf{Platform} & \textbf{Fuzzer} & \textbf{BB Coverage} \\
+\midrule
+\multirow{3}{*}{MQSim} & AFL++ & 37.5\% \\
+ & CSFuzz & 38.4\% \\
+ & FragFuzz (TVDA+DRP) & 38.4\% \\
+\midrule
+\multirow{3}{*}{FEMU} & CSFuzz & 53.2\% \\
+ & FragFuzz (TVDA+DRP) & 53.2\% \\
+ & FragFuzz (TVDA+DRP+FFM) & 53.9\% \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{RQ2: Effectiveness of TVDA}
+The core value of TVDA lies not in ``how many variables are extracted'' but in `how precisely critical variables that actually affect GC triggering are selected.'' This section qualitatively and quantitatively compares CSFuzz's ASan~\cite{asan}-based heuristics with TVDA's threshold pattern matching results.
+
+\subsubsection{Extracted Variable Count Comparison}
+
+\begin{table}[t]
+\centering
+\caption{CSFuzz vs TVDA Variable Extraction Precision Comparison}
+\label{tab:precision}
+\begin{tabularx}{\columnwidth}{@{}l L c c c@{}}
+\toprule
+\textbf{Platform} & \textbf{Technique} & \textbf{Extracted} & \textbf{Valid} & \textbf{Precision} \\
+\midrule
+\multirow{2}{*}{MQSim} & CSFuzz & 40 & 4 & 10.0\% \\
+ & TVDA & 6 & 3 & 50.0\% \\
+\midrule
+\multirow{2}{*}{FEMU} & CSFuzz & 23 & 1 & 4.3\% \\
+ & TVDA & 10 & 5 & 50.0\% \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+CSFuzz extracts several times more variables than TVDA (6.7$\times$ on MQSim and 2.3$\times$ on FEMU).
+However, more variables do not mean more effective state tracking.
+Rather, the more meaningless variables there are, the more state space explosion occurs, causing the fuzzer to be overwhelmed by noise.
+
+Of the 40 variables extracted by CSFuzz, only 4 are meaningful to actual GC logic (precision 10.0\%).
+The remaining 36 are noise variables including:
+
+Compiler-generated variables: cleanup.dest.slot, ehselector.slot, exn.slot, and other exception handling internal variables
+ASan instrumentation byproducts: this.addr, plane\_address.addr, and other pointer addresses themselves
+Loop counters: repeat, repeat218, repeat243, and other loop control variables
+
+In contrast, TVDA performs backward slicing based on threshold comparison patterns (free\_block\_pool\_size < threshold), extracting only variables that directly affect GC trigger conditions such as free block count and invalid page count.
+Similar patterns were observed in the FEMU environment.
+CSFuzz extracted 23 variables, but only 1 was valid (precision 4.3\%); many of the rest were duplicates or meaningless variables like \%cleanup.dest.slot.
+TVDA accurately identified 10 variables directly used in FEMU's GC decision logic like MQSim's, of which 5 were valid (precision 50.0\%).
+
+\subsubsection{Relationship with State Corpus Generation}
+
+\begin{table}[t]
+\centering
+\caption{State Corpus Generation Comparison (MQSim, 10-trial Average)}
+\label{tab:state_corpus}
+\begin{tabularx}{\columnwidth}{@{}Lcc@{}}
+\toprule
+\textbf{Fuzzer} & \textbf{Tracked Vars} & \textbf{State Corpus Adds} \\
+\midrule
+CSFuzz & 40 & 65.4 \\
+FragFuzz (TVDA+DRP) & 6 & 562.6 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+While CSFuzz tracks 40 variables yet achieves only 65.4 State Corpus Adds, TVDA+DRP registered 562.6 states with only 6 variables.
+This suggests:
+
+CSFuzz's noise variables change frequently regardless of I/O, causing Adaptive Partitioning to judge them as ``already seen states'' and ignore them
+TVDA's critical variables change gradually according to actual I/O accumulation, and DRP accurately captures these subtle changes as new states
+
+TVDA showed 5 times higher precision than CSFuzz in MQSim (50\% vs 10\%) and 12 times higher in FEMU (50\% vs 4.3\%).
+The noise variables extracted by TVDA (block\_id, pageID, pgs\_per\_blk, etc.) are physical address variables where I/O operates.
+These variables appear near threshold comparison statements and were included during the slicing process, but they change frequently with every I/O and act as noise during state tracking.
+This demonstrates the limitation that static analysis alone cannot perfectly determine dynamic characteristics of variables, which can be improved through future combination with dynamic profiling.
+
+
+\subsection{RQ3: Contribution of DRP}
+The performance difference between DRP and Adaptive Partitioning was compared under the same TVDA variable set.
+
+\begin{table}[h]
+\centering
+\caption{Performance Comparison by Partitioning Technique (MQSim, 10-trial Average)}
+\label{tab:partitioning}
+\begin{tabularx}{\columnwidth}{@{}Lrrr@{}}
+\toprule
+\textbf{Partitioning} & \textbf{GC Trig.\,\#} & \textbf{GC Done\,\#} & \textbf{Corpus} \\
+\midrule
+Adaptive & 896,849 & 2,275,918 & 19.8 \\
+DRP & \textbf{729,759} & \textbf{1,757,289} & \textbf{562.6} \\
+\midrule
+Improvement & 18.6\%$\downarrow$ & 22.8\%$\downarrow$ & 28.4$\times$$\uparrow$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+DRP reduced the number of commands until GC triggering by 18.6\% compared to Adaptive, with a particularly notable 28.4× difference in State Corpus generation.
+As analyzed in Section 4.C, this is because the Adaptive approach loses existing information when recalculating partitions during variable value drift, whereas DRP preserves the observed value range to maintain consistent sensitivity.
+
+\subsection{RQ4: Impact of FFM}
+The performance difference based on FFM application was analyzed in the FEMU environment.
+FEMU presents a higher nondeterminism environment than MQSim due to full-system emulation.
+
+\begin{table}[t]
+\caption{FFM Effectiveness in Nondeterministic FEMU Environment (3-Trial Average)}
+\label{tab:femu_ffm_effect}
+\centering
+\begin{tabularx}{\columnwidth}{@{}Lrr@{}}
+\toprule
+\textbf{Configuration} & \textbf{GC Trig.\,\#} & \textbf{vs AFL++} \\
+\midrule
+Random Fuzzer & 533,993,541 & -- \\
+AFL++ & 18,899,079 & -- \\
+State-Data Aware & 6,618,284 & 65.0\% \\
+CSFuzz & 7,275,844 & 61.5\% \\
+\midrule
+FragFuzz (TVDA+Adaptive) & 6,777,157 & 64.1\% \\
+FragFuzz (TVDA+DRP) & 6,605,920 & 65.0\% \\
+FragFuzz (TVDA+DRP+FFM) & \textbf{5,507,112} & \textbf{70.9\%} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Table~\ref{tab:femu_ffm_effect} presents the evaluation results in the highly nondeterministic FEMU environment.
+As before, we focus solely on the number of commands required to trigger GC.
+
+The FragFuzz (TVDA+DRP+FFM) configuration demonstrated superior efficiency, triggering GC with an average of 5,507,112 commands.
+This represents a 16.6\% reduction in I/O operations compared to the configuration using only DRP (6,605,920 commands).
+This result indicates that the FTL Fragmentation Metric (FFM) effectively acts as a noise filter in nondeterministic environments, prioritizing input sequences that structurally degrade the FTL map rather than simply increasing coverage.
+
+Furthermore, compared to the baseline AFL++, our fully configured approach reduced the required I/O commands by 70.9\%.
+Even against the state-aware competitor CSFuzz (7,275,844 commands), FragFuzz achieved a 24.3\% improvement, proving that guiding fuzzing towards fragmentation is a more deterministic strategy for reaching deep maintenance logic than simple variable tracking.
+
+\section{Discussion}
+This section discusses the academic significance and extensibility of the proposed FragFuzz framework, and describes potential limitations (Threats to Validity) inherent in the experimental environment and methodology.
+
+\subsection{From Passive Observation to Active Shaping}
+Most existing state-aware fuzzing research has taken a passive approach that detects state changes and utilizes them as feedback.
+That is, the fuzzer waits to reach a specific state and provides rewards when that state is reached by chance.
+In contrast, the FragFuzz proposed in this research has important significance in shifting this paradigm to active shaping.
+We defined the fragmentation state where GC efficiency becomes worst as a clear target and designed the fuzzer to intentionally drive the system toward that state.
+This approach demonstrated that not only simple functional defects (crashes) but also performance bugs that degrade system performance and resource starvation problems can be systematically detected in the SSD domain.
+
+\subsection{Justification for Threshold-Based Logic Targeting}
+This research's selection of threshold-based logic as the core target is grounded in the structural characteristics of SSD firmware.
+As analyzed in Section 4.B, core maintenance logic including GC trigger, Must-GC, wear leveling, thermal management, and lifespan management in major open-source SSD platforms (FEMU, MQSim, NVMeVirt, ZNS+, etc.) is controlled without exception through threshold comparison statements.
+This stems from the design philosophy where SSD firmware continuously monitors resource states (Free Block, Invalid Page, etc.) and performs costly maintenance operations only when specific conditions are met.
+Therefore, tracking threshold-related variables and guiding fuzzing toward satisfying those conditions is an effective strategy for SSD firmware verification.
+
+\subsection{Generalizability}
+The TVDA (automatic threshold variable extraction) and DRP (dynamic range partitioning) techniques we propose were validated specifically for SSD firmware, but their underlying algorithms are general-purpose.
+
+Extensibility of TVDA: Based on Program Dependency Graphs (PDG) and slicing techniques, it can be utilized to detect conditional trigger logic in any embedded software where source code (or IR) is available.
+In particular, the threshold pattern matching approach is directly applicable to storage and memory devices with similar resource management logic, such as HDDs, eStorage, and CXL memory.
+
+Generality of DRP: DRP optimizes feedback ranges based solely on observed delta statistics without knowing the semantics of variables.
+In particular, the ``drift tolerance'' characteristic emphasized in this research enables continued fuzzing while preserving existing coverage information even in dynamic environments where system operational modes change rapidly at runtime.
+Therefore, this framework can be extended to test automation for all embedded systems that operate when accumulated events exceed specific thresholds, such as robot control systems and IoT sensor networks.
+
+\subsection{Threats to Validity}
+While the results of this research are robust, we acknowledge the following potential internal and external threats to validity.
+Limitations of Emulation Environments (External Validity): The experiments were conducted in emulator/simulator environments, namely FEMU and MQSim.
+While these are optimized for firmware logic verification, they may not perfectly replicate the physical characteristics of actual NAND flash memory (electrical noise, latency variations due to temperature, etc.) or the precise timing of hardware controllers. 
+
+Therefore, timing race conditions may manifest differently in actual hardware environments, requiring additional verification through FPGA-based platforms or JTAG interfaces of actual SSDs in future work.
+Additionally, proprietary firmware from commercial SSD manufacturers may use more complex hybrid mapping or caching policies, so the experimental results of this research may not be directly reproducible.
+However, since the fundamental operating principle of FTLs—threshold-based maintenance operations—remains the same, we expect the core concept (State-Driven) of the proposed framework to be validly applicable to commercial firmware verification as well.
+
+Completeness of Variable Extraction (Internal Validity): Since TVDA relies on static analysis, there is a possibility of missing some threshold variables (false negatives) in cases involving pointer aliasing or complex indirect references.
+Additionally, as analyzed in Section 5.C, TVDA shows 50\% precision and includes some noise variables (physical address-related indices, configuration constants, etc.).
+This demonstrates the limitation that static analysis alone cannot perfectly determine dynamic characteristics of variables (whether they change at runtime, frequency of changes).
+This can be improved in future work through combination with dynamic profiling to filter noise variables.
+
+Robust State Tracking and Validation Acceleration under Nondeterminism: Due to SSD internal parallelism and asynchronous operations, execution paths can differ even for identical inputs.
+Just as recent SSD research (e.g., IODA~\cite{ioda}) analyzed and controlled nondeterminism to guarantee I/O performance and QoS, this research also addresses nondeterminism as a means for test acceleration.
+Instead of serializing I/O to completely eliminate nondeterminism, we chose an approach that maintains a high-speed parallel execution environment while technically filtering the resulting noise.
+In this research, we mitigated noise occurring during the process of reaching maintenance logic triggering by guiding fuzzing toward intensifying internal fragmentation through FFM metrics.
+However, this does not eliminate nondeterminism itself, and bug reproducibility can be improved in future work through combination with lightweight record-and-replay techniques.
+
+\section{Conclusion}
+In this paper, we proposed FragFuzz (FTL Fragmentation-driven Fuzzer), a fuzzing framework that actively manipulates fragmentation states to verify deep state-dependent defects in SSD firmware.
+
+To overcome the limitations where existing coverage-guided fuzzing could not surpass state barriers and state-aware fuzzing remained at passive observation, this research integrated three key techniques.
+First, automatic threshold variable extraction (TVDA) automatically identifies critical variables affecting GC trigger conditions through static analysis, enabling efficient state tracking without manual analysis.
+Second, Dynamic Range Partitioning (DRP) sensitively tracks gradual changes in variable values while preserving existing coverage information in drift environments, accurately capturing subtle state progression toward threshold attainment.
+Third, FTL Fragmentation Metric (FFM) filters timing noise in nondeterministic environments and guides fuzzing toward intensifying internal fragmentation.
+The academic significance of this research lies in redefining fragmentation—not as a performance problem to be avoided, but as a powerful stressor for verification.
+This accelerated reaching deep maintenance logic while maintaining the high-load parallel execution environment that actual firmware experiences.
+
+Experimental results on both FEMU and MQSim platforms demonstrate that FragFuzz reached targets with 52.5\% fewer commands until GC triggering and 65.0\% fewer commands until GC completion compared to AFL++, while also showing improvements of 28.8\% and 48.4\% respectively compared to CSFuzz.
+This demonstrates that the proposed technique is generally applicable without being dependent on specific platforms.
+
+In future research, we plan to design domain-specific metrics for additional maintenance logic such as wear leveling and bad block management, and enhance the completeness of storage system verification through extension to actual hardware environments.
+
+\bibliographystyle{unsrt}
+\bibliography{reference}
+
+\end{document}
