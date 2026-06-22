@@ -473,33 +473,10 @@ However, no other defects attributable to firmware flaws were found, which is ju
 Therefore, this research does not address bug discovery count as a separate RQ, focusing evaluation on deep logic reach efficiency improvement.
 
 \subsection{Coverage Analysis}
-Table~\ref{tab:coverage} reports the final Basic Block (BB) coverage achieved on both platforms.
-We observe that absolute BB coverage saturates at similar levels across all fuzzers (approximately 38\% on MQSim and 54\% on FEMU).
-This is because the majority of the firmware codebase consists of logic unrelated to the I/O datapath, such as initialization, NVMe administrative command handling, error paths, and debugging routines, which are not exercised by I/O workloads regardless of the fuzzing strategy.
-Consequently, absolute BB coverage alone is not a discriminating metric for datapath exploration.
-
-To assess exploration of the maintenance datapath specifically, we manually curated the subset of basic blocks belonging to the I/O write/read and GC datapath.
-Over this curated I/O-related subset, FragFuzz reaches approximately 99\% coverage, indicating near-complete exploration of the datapath logic that governs deep maintenance behavior.
+Absolute Basic Block (BB) coverage saturates at similar levels across all fuzzers (approximately 38\% on MQSim and 54\% on FEMU), because the majority of the firmware codebase consists of logic unrelated to the I/O datapath---such as initialization, NVMe administrative command handling, error paths, and debugging routines---that is not exercised by I/O workloads regardless of the fuzzing strategy.
+Absolute BB coverage alone is therefore not a discriminating metric for datapath exploration.
+To assess exploration of the maintenance datapath specifically, we manually curated the subset of basic blocks belonging to the I/O write/read and GC datapath; over this curated I/O-related subset, FragFuzz reaches approximately 99\% coverage, indicating near-complete exploration of the datapath logic that governs deep maintenance behavior.
 This confirms that the relevant differentiator among fuzzers is not the final coverage plateau but the number of commands required to reach the deep maintenance logic, which is the primary metric adopted throughout this evaluation.
-
-\begin{table}[t]
-\caption{Final Basic Block Coverage}
-\label{tab:coverage}
-\centering
-\begin{tabularx}{\columnwidth}{@{}l X r@{}}
-\toprule
-\textbf{Platform} & \textbf{Fuzzer} & \textbf{BB Coverage} \\
-\midrule
-\multirow{3}{*}{MQSim} & AFL++ & 37.5\% \\
- & CSFuzz & 38.4\% \\
- & FragFuzz (TVDA+DRP) & 38.4\% \\
-\midrule
-\multirow{3}{*}{FEMU} & CSFuzz & 53.2\% \\
- & FragFuzz (TVDA+DRP) & 53.2\% \\
- & FragFuzz (TVDA+DRP+FFM) & 53.9\% \\
-\bottomrule
-\end{tabularx}
-\end{table}
 
 \subsection{RQ2: Effectiveness of TVDA}
 The core value of TVDA lies not in ``how many variables are extracted'' but in `how precisely critical variables that actually affect GC triggering are selected.'' This section qualitatively and quantitatively compares CSFuzz's ASan~\cite{asan}-based heuristics with TVDA's threshold pattern matching results.
