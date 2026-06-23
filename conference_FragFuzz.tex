@@ -88,21 +88,11 @@ State changes in SSDs are not immediate.
 Tens of thousands of I/O operations must accumulate before reaching threshold values.
 Existing fuzzers provide feedback only when states completely change or new branches are discovered, causing them to misjudge useful input sequences that incrementally worsen states toward thresholds as ``no change'' and discard them.
 
-Our framework integrates three key techniques.
-First, Threshold-Variable Dependency Analysis (TVDA) automatically extracts variables through backward slicing on target threshold logic.
-Second, Dynamic Range Partitioning (DRP) classifies state values with delta-based feedback, providing robustness across diverse firmware implementations.
-Third, FTL Fragmentation Metric (FFM) quantifies fragmentation severity and guides fuzzing toward worst-case states, including resource exhaustion and mapping table disorder, to efficiently trigger deep maintenance logic.
-
-We evaluate our proposed method on two distinct platforms: FEMU, a QEMU-based SSD emulator, and MQSim, a high-fidelity multi-queue SSD simulator.
-Experimental results demonstrate that FragFuzz reaches deep maintenance logic with 65.0\% fewer commands than state-of-the-art fuzzers such as AFL++, while covering approximately 99\% of the manually curated I/O-related basic blocks.
-Furthermore, we successfully induce deep state transitions encompassing not only GC triggers but also subsequent maintenance routines.
-
-The main contributions of this paper are as follows:
+We address these limitations with FragFuzz, whose main contributions are as follows:
 \begin{enumerate}
-    \item \textbf{Automated State Sensitivity:} TVDA and DRP enable efficient exploration through automatic extraction of critical variables and dynamic adaptation without manual configuration.
-    \item \textbf{Robustness to Nondeterminism:} FFM provides stable feedback in nondeterministic environments by prioritizing inputs that drive firmware toward resource-exhausted states.
-    \item \textbf{FTL Fragmentation Metric:} Fragmentation metrics including VPD serve as optimization targets for extreme testing of GC and metadata logic.
-    \item \textbf{Comprehensive Evaluation:} We demonstrate a 65.0\% reduction in the number of commands required to reach deep maintenance logic compared to AFL++ on FEMU and MQSim, while attaining near-complete (approximately 99\%) coverage of the manually curated I/O-related basic blocks, along with efficient deep-state reachability.
+    \item \textbf{Automated State Sensitivity:} TVDA and DRP automatically extract the critical threshold variables and track their gradual drift, enabling efficient exploration without manual configuration.
+    \item \textbf{Fragmentation as a Stressor (FFM):} Rather than treating fragmentation as a problem to optimize away, FFM quantifies its severity and steers fuzzing toward worst-case states (resource exhaustion and mapping-table disorder), providing stable feedback even under nondeterminism.
+    \item \textbf{Comprehensive Evaluation:} On FEMU and MQSim, FragFuzz reaches deep maintenance logic with 65.0\% fewer commands than AFL++ while covering approximately 99\% of the manually curated I/O-related basic blocks, inducing not only GC triggers but also subsequent maintenance routines.
 \end{enumerate}
 
 \section{Background and Motivation}
