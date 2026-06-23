@@ -106,13 +106,9 @@ GC is triggered upon accumulation of invalid pages or exhaustion of free blocks,
 In other words, verification requires reaching deep states through the accumulation of millions of I/O operations rather than single I/O commands.
 
 \subsection{Limitations of CGF in SSD Testing}
-Coverage-guided fuzzers (CGF) such as AFL~\cite{afl}, AFL++~\cite{aflpp} consider inputs that increase code coverage as ``interesting,'' saving and mutating them.
-However, two limitations arise in SSD firmware testing.
-First, insensitivity to state changes.
-CGF discards inputs that do not immediately increase coverage, causing the loss of accumulated I/O needed to reach thresholds and resulting in coverage plateaus or inefficient repeated exploration of shallow states.
-Second, nondeterministic I/O.
-Due to logical-to-physical address mapping states, multi-channel and queuing mechanisms, and background operations, SSDs may execute different code paths for identical input sequences depending on internal state at execution time.
-This confuses the fuzzer's ability to identify interesting seeds and degrades reproducibility.
+Coverage-guided fuzzers (CGF) such as AFL~\cite{afl} and AFL++~\cite{aflpp} save and mutate inputs that increase code coverage, but face two limitations in SSD firmware testing.
+First, they are insensitive to state changes: inputs that do not immediately raise coverage are discarded, losing the accumulated I/O needed to reach thresholds and yielding coverage plateaus.
+Second, I/O is nondeterministic: due to address-mapping state, multi-channel queuing, and background operations, identical input sequences may take different code paths depending on internal state, which confuses seed selection and degrades reproducibility.
 
 \subsection{FTL Fragmentation and State Complexity}
 In SSD firmware, fragmentation can be defined as a critical state that maximizes the logical complexity of firmware, beyond being a simple indicator of storage performance degradation.
@@ -134,9 +130,7 @@ This section reviews existing research on SSD firmware verification, covering fu
 \subsection{Evolution of Fuzzing Techniques and State-Aware Approaches}
 Fuzzing has established itself as a standard technique for software vulnerability detection, yet reveals clear limitations when verifying stateful systems such as SSD firmware.
 
-\subsubsection*{Coverage-Guided Fuzzing (CGF).} Tools such as AFL~\cite{afl} and AFL++~\cite{aflpp} effectively explore code paths through edge coverage tracking but remain fundamentally state-unaware.
-In SSD firmware, GC triggers only when internal variables such as free block count fall below thresholds after millions of I/O operations.
-CGF cannot perceive this state accumulation, leading to coverage plateaus where fuzzers repeatedly explore shallow paths indefinitely.
+\subsubsection*{Coverage-Guided Fuzzing (CGF).} Tools such as AFL~\cite{afl} and AFL++~\cite{aflpp} explore code paths through edge coverage but remain fundamentally state-unaware, unable to perceive the threshold-crossing state accumulation that gates SSD maintenance logic and thus stalling on coverage plateaus.
 
 \subsubsection*{State-Aware Fuzzing.} To address these challenges, recent research has explored state-aware fuzzing through protocol-specific modeling~\cite{aflnet, stateafl}, variable tracking methods~\cite{statefuzz}, and annotation-based deep-state exploration~\cite{ijon}.
 However, directly applying these techniques to SSD firmware remains insufficient.
@@ -368,10 +362,8 @@ Measures how randomly distributed the mapping from logical to physical addresses
 Sequential writes generate low entropy, while random overwrites generate high entropy.
 High entropy means mapping table locality is destroyed, degrading cache efficiency and complicating valid page tracking during GC.
 
-The final FFM score is calculated as the equally weighted average of the three metrics.
-Equal weights were used to prevent arbitrary bias toward specific metrics.
-Each metric captures different aspects of fragmentation, and which metric is more important can vary depending on workload characteristics.
-Equal weighting is a robust choice under such uncertainty.
+The final FFM score is the equally weighted average of the three metrics.
+Since each metric captures a different aspect of fragmentation and their relative importance varies by workload, equal weighting is a robust, bias-free default.
 
 The three defined FFM metrics are integrated as tracking targets for the DRP algorithm along with variables extracted by TVDA.
 Through this, not only variables directly involved in GC threshold conditions, but also gradual changes in fragmentation state are tracked as part of state coverage.
@@ -417,7 +409,7 @@ Thus, FEMU is primarily used to evaluate nondeterminism mitigation and FFM effec
 Due to the inherent randomness of fuzzing, repeated experiments were conducted for each configuration (MQSim: 10 trials, FEMU: 3 trials).
 We adopt the number of I/O commands, rather than wall-clock time, as the primary deterministic metric to strictly evaluate algorithmic efficiency independent of hardware throughput.
 To account for the inherent randomness of fuzzing, we report statistical significance using the two-sided Mann--Whitney $U$ test together with the Vargha--Delaney $\hat{A}_{12}$ effect size and Cohen's $d$; for the proposed configuration we additionally report 95\% confidence intervals.
-For the MQSim campaign (10 trials per configuration) these tests are well powered, whereas the computationally expensive FEMU campaign (3 trials) is interpreted through effect sizes rather than significance thresholds, as discussed in Section~\ref{sec:rq4}.
+For the MQSim campaign (10 trials per configuration) these tests are well powered, whereas the computationally expensive FEMU campaign (3 trials) is interpreted through effect sizes rather than significance thresholds.
 All baselines and FragFuzz are driven through the identical \texttt{nvme-cli} command interface and input-parsing harness, so that observed differences arise solely from the guidance algorithm rather than from the I/O delivery path.
 
 The primary measurement metrics are as follows:
@@ -461,27 +453,21 @@ The GC-completion reductions over AFL++ ($p<0.001$) and CSFuzz ($p<0.01$) are li
 Although the learning-based GRAFT reaches GC in fewer raw commands (600,156), this figure is obtained in a modified simulator with a larger device and costly offline pre-training.
 Crucially, GRAFT's artifacts are not publicly available and its modified simulator is undisclosed, so a controlled head-to-head experiment is infeasible; the figure is reproduced from the original paper for context only and must not be read as a same-environment comparison.
 On the standard, unmodified MQSim, FragFuzz attains comparable efficiency without any pre-training while additionally tracking GC completion, which GRAFT does not report.
-It is worth clarifying why we evaluate \emph{reachability efficiency} rather than the number of bugs found.
-FragFuzz is, by design, a directed greybox fuzzer whose objective is to reach a specific class of deep maintenance logic; unlike CFG-distance directed fuzzers such as AFLGo~\cite{aflgo}, it is directed by accumulated state distance toward threshold conditions rather than by code distance.
-For such directed fuzzers, the established effectiveness axis is the cost to reach the target site, not the aggregate bug count over a campaign.
-Two properties of our setting make this especially appropriate.
-First, the evaluation targets are mature, long-used emulator/simulator codebases in which residual deep-logic faults are scarce.
-Second, and more fundamentally, when a fault is triggered the emulator halts, so campaign-style crash counting---which presumes the fuzzer survives and continues after each finding---is not meaningful in this environment; the actionable signal is instead whether, and how quickly, the fuzzer drives the firmware into the deep maintenance logic where such faults reside.
-Consistent with this view, our reachability witness is the near-complete coverage of the I/O-related maintenance datapath reported in Section~\ref{sec:coverage}: reaching that region is the necessary precondition for triggering any latent defect within it.
-As an existence proof that reaching the region exposes real defects, during these experiments we uncovered a request-omission defect in FEMU's I/O error-handling path: requests were not enqueued to the completion queue when errors occurred, causing the host to wait indefinitely and leak resources.
-We therefore report reachability efficiency as the primary effectiveness metric and treat discovered defects as illustrative case studies.
+It is worth clarifying why we evaluate \emph{reachability efficiency} rather than bug count.
+FragFuzz is, by design, a directed greybox fuzzer aimed at a specific class of deep maintenance logic; unlike CFG-distance directed fuzzers such as AFLGo~\cite{aflgo}, it is directed by accumulated state distance toward threshold conditions rather than code distance.
+For directed fuzzers the established effectiveness axis is the cost to reach the target, not aggregate bug count, and two properties of our setting reinforce this: the targets are mature emulator/simulator codebases in which residual deep-logic faults are scarce, and a triggered fault halts the emulator, making campaign-style crash counting infeasible.
+The actionable signal is therefore how quickly the fuzzer reaches the deep maintenance logic, witnessed by the near-complete datapath coverage reported in the following subsection.
+As an existence proof that reaching this region exposes real defects, we uncovered a request-omission defect in FEMU's I/O error-handling path, where requests were not enqueued to the completion queue on error, causing indefinite host waits and resource leaks.
 
 \subsection{Coverage Analysis}
-\label{sec:coverage}
 Absolute Basic Block (BB) coverage saturates at similar levels across all fuzzers (approximately 38\% on MQSim and 54\% on FEMU), because the majority of the firmware codebase consists of logic unrelated to the I/O datapath---such as initialization, NVMe administrative command handling, error paths, and debugging routines---that is not exercised by I/O workloads regardless of the fuzzing strategy.
 Absolute BB coverage alone is therefore not a discriminating metric for datapath exploration.
 To assess exploration of the maintenance datapath specifically, the subset of basic blocks lying on the host write/read and GC datapaths was identified by SSD-firmware domain experts against each platform's documented FTL logic, using a fixed criterion: a block is included if it is reachable from an NVMe read/write command handler and participates in mapping update, invalidation, victim selection, or GC execution.
 Over this curated I/O-related subset, FragFuzz reaches approximately 99\% coverage, indicating near-complete exploration of the datapath logic that governs deep maintenance behavior.
-We note that the boundary of this subset is expert-defined and thus carries a degree of subjectivity, which we record as a threat to construct validity in Section~\ref{sec:threats}.
+We note that the boundary of this subset is expert-defined and thus carries a degree of subjectivity, which we record as a threat to construct validity.
 This confirms that the relevant differentiator among fuzzers is not the final coverage plateau but the number of commands required to reach the deep maintenance logic, which is the primary metric adopted throughout this evaluation.
 
 \subsection{RQ2: Effectiveness of TVDA}
-\label{sec:rq2_label}
 The core value of TVDA lies not in ``how many variables are extracted'' but in ``how precisely critical variables that actually affect GC triggering are selected.'' This section qualitatively and quantitatively compares CSFuzz's ASan~\cite{asan}-based heuristics with TVDA's threshold pattern matching results.
 
 \subsubsection{Extracted Variable Count Comparison}
@@ -567,7 +553,6 @@ The 22.8\% reduction in commands until GC completion points in the same directio
 As analyzed in Section 4.C, this is because the Adaptive approach loses existing information when recalculating partitions during variable value drift, whereas DRP preserves the observed value range to maintain consistent sensitivity.
 
 \subsection{RQ4: Impact of FFM}
-\label{sec:rq4}
 The performance difference based on FFM application was analyzed in the FEMU environment.
 FEMU presents a higher nondeterminism environment than MQSim due to full-system emulation.
 
@@ -616,10 +601,8 @@ We defined the fragmentation state where GC efficiency becomes worst as a clear 
 This approach demonstrated that not only simple functional defects (crashes) but also performance bugs that degrade system performance and resource starvation problems can be systematically detected in the SSD domain.
 
 \subsection{Justification for Threshold-Based Logic Targeting}
-This research's selection of threshold-based logic as the core target is grounded in the structural characteristics of SSD firmware.
-As analyzed in Section 4.B, core maintenance logic including GC trigger, Must-GC, wear leveling, thermal management, and lifespan management in major open-source SSD platforms (FEMU, MQSim, NVMeVirt, ZNS+, etc.) is controlled without exception through threshold comparison statements.
-This stems from the design philosophy where SSD firmware continuously monitors resource states (Free Block, Invalid Page, etc.) and performs costly maintenance operations only when specific conditions are met.
-Therefore, tracking threshold-related variables and guiding fuzzing toward satisfying those conditions is an effective strategy for SSD firmware verification.
+Our choice of threshold-based logic as the core target is grounded in SSD firmware structure.
+As analyzed in Section 4.B, core maintenance logic (GC trigger, Must-GC, wear leveling, thermal and lifespan management) across major open-source platforms is, without exception, gated by threshold comparisons; firmware monitors resource states and performs costly maintenance only when these conditions are met, so tracking threshold variables and steering fuzzing toward them is an effective verification strategy.
 
 \subsection{Generalizability}
 Although validated on SSD firmware, the underlying algorithms are general-purpose.
@@ -627,11 +610,10 @@ TVDA relies only on PDG-based slicing, so it applies to any embedded software wi
 DRP optimizes feedback ranges from observed delta statistics alone, without variable semantics; its drift tolerance preserves existing coverage information even as operational modes change at runtime, extending the framework to other systems whose behavior is gated by accumulated events crossing thresholds.
 
 \subsection{Threats to Validity}
-\label{sec:threats}
 While the results of this research are robust, we acknowledge the following potential internal and external threats to validity.
 
 Construct Validity: Two of our measurements rely on expert judgment.
-The I/O-related basic-block subset used for the curated coverage metric (Section~\ref{sec:coverage}) and the ``valid'' labeling of extracted threshold variables (Section~\ref{sec:rq2_label}) were both determined by SSD-firmware engineers against the platforms' documented logic.
+The I/O-related basic-block subset used for the curated coverage metric (Section 5.C) and the ``valid'' labeling of extracted threshold variables (Section 5.D) were both determined by SSD-firmware engineers against the platforms' documented logic.
 While guided by explicit criteria, these boundaries are inherently subjective and could shift the curated-coverage and precision figures under a different labeling.
 The FEMU campaign is additionally limited to three trials per configuration; we therefore report effect sizes for it and regard significance-level confirmation through a larger campaign as future work.
 Limitations of Emulation Environments (External Validity): The experiments were conducted in emulator/simulator environments, namely FEMU and MQSim.
