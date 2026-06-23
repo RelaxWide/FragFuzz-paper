@@ -14,8 +14,8 @@ collection). It integrates three techniques:
 - **FFM** (FTL Fragmentation Metric) — mitigates timing noise in nondeterministic
   environments by prioritizing inputs that intensify internal fragmentation.
 
-Evaluated on **FEMU** and **MQSim**, FragFuzz reaches GC triggering with 52.5%
-fewer commands and GC completion with 65.0% fewer commands than AFL++, and
+Evaluated on **FEMU** and **MQSim**, FragFuzz reaches GC triggering with 51.9%
+fewer commands and GC completion with 64.2% fewer commands than AFL++, and
 improves over CSFuzz by 28.8% / 48.4%.
 
 ## Repository contents
