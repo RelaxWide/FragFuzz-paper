@@ -162,9 +162,7 @@ DGF cannot understand this data causality, making it ineffective for SSD firmwar
 SSD firmware validation requires balancing hardware fidelity with software visibility.
 Modern simulators such as MQSim~\cite{mqsim} have significantly narrowed the reality gap through detailed NVMe protocol modeling, while recent data-driven calibration that trains a deep neural network on paired simulator/device execution profiles~\cite{lee} reduces simulation error to approximately 3\%.
 In contrast, hardware platforms like OpenSSD~\cite{openssd, cosmosplus} suffer from state opacity—real-time variable tracking via JTAG or UART causes probe effects that can mask timing-sensitive cases, while repetitive stress testing accelerates physical wearout.
-This research adopts a dual platform strategy using FEMU~\cite{femu} and MQSim complementarily.
-FEMU provides full system emulation with realistic host-device interactions, while MQSim offers precise internal timing and resource contention modeling.
-This cross-validation ensures generalizability across different simulation environments.
+We therefore evaluate on the FEMU~\cite{femu} and MQSim simulators, which expose firmware internals without these hardware limitations.
 
 \subsection{Analysis and Control of SSD Nondeterminism}
 SSD parallel processing and asynchronous background operations induce I/O nondeterminism.
@@ -398,8 +396,7 @@ By adding seeds to the State Corpus only when one or more FFM metrics reach high
 
 \subsection{Experimental Setup}
 \subsubsection{Target Firmware and Platforms}
-This research validated generalizability by evaluating the proposed techniques on two distinct SSD simulation platforms.
-Since each platform has different abstraction levels and operational characteristics, measurable metrics and evaluation focuses differ accordingly.
+We evaluate on two SSD platforms whose differing abstraction levels make different metrics measurable, so each is used where it is most informative.
 
 \textbf{MQSim~\cite{mqsim}:} A simulator that precisely models the multi-queue/multi-chip architecture of modern NVMe SSDs, with strengths in internal timing modeling and resource contention simulation.
 In particular, it accurately reflects the impact of actual I/O workloads on GC execution even after GC triggering, enabling meaningful measurement of both GC Trigger and GC Done timings.
@@ -411,8 +408,6 @@ Due to full-system emulation, it presents a higher nondeterminism environment co
 GC Trigger can be measured, but GC is implemented to be processed immediately after triggering, making GC Done measurement unavailable.
 Instead, FTL internal states (Invalidation Ratio, VPC Variance, L2P Entropy) can be extracted in real-time.
 Thus, FEMU is primarily used to evaluate nondeterminism mitigation and FFM effectiveness.
-
-In summary, the two platforms complement each other: MQSim enables precise GC completion analysis in a controlled environment, while FEMU provides realistic nondeterministic conditions with full FFM metric support.
 
 \subsubsection{Baselines}
 \begin{itemize}
@@ -520,7 +515,7 @@ TVDA accurately identified 10 variables directly used in FEMU's GC decision logi
 \label{tab:state_corpus}
 \begin{tabularx}{\columnwidth}{@{}Xcc@{}}
 \toprule
-\textbf{Fuzzer} & \textbf{Tracked Vars} & \textbf{State Corpus Adds} \\
+\textbf{Fuzzer} & \textbf{Tracked Vars} & \textbf{Corpus Adds} \\
 \midrule
 CSFuzz & 40 & 65.4 \\
 FragFuzz (TVDA+DRP) & 6 & 562.6 \\
@@ -612,14 +607,9 @@ This stems from the design philosophy where SSD firmware continuously monitors r
 Therefore, tracking threshold-related variables and guiding fuzzing toward satisfying those conditions is an effective strategy for SSD firmware verification.
 
 \subsection{Generalizability}
-The TVDA (automatic threshold variable extraction) and DRP (dynamic range partitioning) techniques we propose were validated specifically for SSD firmware, but their underlying algorithms are general-purpose.
-
-Extensibility of TVDA: Based on Program Dependency Graphs (PDG) and slicing techniques, it can be utilized to detect conditional trigger logic in any embedded software where source code (or IR) is available.
-In particular, the threshold pattern matching approach is directly applicable to storage and memory devices with similar resource management logic, such as HDDs, eStorage, and CXL memory.
-
-Generality of DRP: DRP optimizes feedback ranges based solely on observed delta statistics without knowing the semantics of variables.
-In particular, the ``drift tolerance'' characteristic emphasized in this research enables continued fuzzing while preserving existing coverage information even in dynamic environments where system operational modes change rapidly at runtime.
-Therefore, this framework can be extended to test automation for all embedded systems that operate when accumulated events exceed specific thresholds, such as robot control systems and IoT sensor networks.
+Although validated on SSD firmware, the underlying algorithms are general-purpose.
+TVDA relies only on PDG-based slicing, so it applies to any embedded software with available source or IR and threshold-style trigger logic.
+DRP optimizes feedback ranges from observed delta statistics alone, without variable semantics; its drift tolerance preserves existing coverage information even as operational modes change at runtime, extending the framework to other systems whose behavior is gated by accumulated events crossing thresholds.
 
 \subsection{Threats to Validity}
 While the results of this research are robust, we acknowledge the following potential internal and external threats to validity.
@@ -635,19 +625,13 @@ Additionally, as analyzed in Section 5.D, TVDA shows 50\% precision and includes
 This demonstrates the limitation that static analysis alone cannot perfectly determine dynamic characteristics of variables (whether they change at runtime, frequency of changes).
 This can be improved in future work through combination with dynamic profiling to filter noise variables.
 
-Robust State Tracking and Validation Acceleration under Nondeterminism: Due to SSD internal parallelism and asynchronous operations, execution paths can differ even for identical inputs.
-Just as recent SSD research (e.g., IODA~\cite{ioda}) analyzed and controlled nondeterminism to guarantee I/O performance and QoS, this research also addresses nondeterminism as a means for test acceleration.
-Instead of serializing I/O to completely eliminate nondeterminism, we chose an approach that maintains a high-speed parallel execution environment while technically filtering the resulting noise.
-In this research, we mitigated noise occurring during the process of reaching maintenance logic triggering by guiding fuzzing toward intensifying internal fragmentation through FFM metrics.
-However, this does not eliminate nondeterminism itself, and bug reproducibility can be improved in future work through combination with lightweight record-and-replay techniques.
+Nondeterminism under Acceleration: SSD internal parallelism and asynchronous operations make execution paths differ even for identical inputs.
+Rather than serializing I/O, FragFuzz keeps a high-speed parallel environment and filters the resulting noise via the FFM metrics; this does not remove nondeterminism itself, so bug reproducibility can be improved in future work through lightweight record-and-replay.
 
 \section{Conclusion}
 In this paper, we proposed FragFuzz (FTL Fragmentation-driven Fuzzer), a fuzzing framework that actively manipulates fragmentation states to verify deep state-dependent defects in SSD firmware.
 
-To overcome the limitations where existing coverage-guided fuzzing could not surpass state barriers and state-aware fuzzing remained at passive observation, this research integrated three key techniques.
-First, automatic threshold variable extraction (TVDA) automatically identifies critical variables affecting GC trigger conditions through static analysis, enabling efficient state tracking without manual analysis.
-Second, Dynamic Range Partitioning (DRP) sensitively tracks gradual changes in variable values while preserving existing coverage information in drift environments, accurately capturing subtle state progression toward threshold attainment.
-Third, FTL Fragmentation Metric (FFM) filters timing noise in nondeterministic environments and guides fuzzing toward intensifying internal fragmentation.
+To overcome the limitations where coverage-guided fuzzing could not surpass state barriers and state-aware fuzzing remained at passive observation, FragFuzz integrates three techniques: TVDA automatically extracts the critical threshold variables, DRP tracks their gradual drift while preserving coverage information, and FFM filters timing noise while steering fuzzing toward worst-case fragmentation.
 The academic significance of this research lies in redefining fragmentation—not as a performance problem to be avoided, but as a powerful stressor for verification.
 This accelerated reaching deep maintenance logic while maintaining the high-load parallel execution environment that actual firmware experiences.
 
