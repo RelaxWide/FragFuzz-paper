@@ -41,7 +41,7 @@ Defects in these maintenance routines are difficult to detect with conventional 
 Coverage-guided fuzzing (CGF) tools such as AFL++ are effective at exploring code paths but remain state-unaware, discarding valuable inputs that incrementally progress toward threshold conditions without immediately increasing coverage.
 Existing state-aware fuzzing techniques assume discrete state transitions and thus fail to capture the gradual, fine-grained state changes inherent to SSD firmware.
 
-In this paper, we propose FragFuzz (FTL Fragmentation-driven Fuzzer), a greybox fuzzing framework that actively drives  SSD firmware toward worst-case fragmentation states to efficiently trigger deep maintenance logic.
+In this paper, we propose FragFuzz (FTL Fragmentation-driven Fuzzer), a greybox fuzzing framework that actively drives SSD firmware toward worst-case fragmentation states to efficiently trigger deep maintenance logic.
 Our approach integrates three key techniques.
 First, Threshold-Variable Dependency Analysis (TVDA) automatically extracts critical variables governing GC trigger conditions through backward slicing on program dependency graph information.
 Second, Dynamic Range Partitioning (DRP) effectively tracks gradual variable changes while preserving coverage information under value drift.
@@ -66,13 +66,13 @@ Defects in these internal logic components can lead to catastrophic data loss~\c
 The risks posed by firmware defects stemming from accumulated state have been repeatedly demonstrated through real-world commercial product incidents.
 Notably, in 2019, HPE issued an urgent warning~\cite{hpe-ssd-bulletin} about a critical defect in certain SAS SSD models that would simultaneously suffer permanent failure upon reaching exactly 32,768 hours of operation time due to an internal counter overflow, prompting the release of emergency firmware updates.
 
-Additionally, consumer high performance SSDs such as the Samsung 980 Pro and 990 Pro experienced issues~\cite{tomshw-samsung-ssd} where metadata processing logic errors caused drives to enter read-only mode or exhibit abnormally rapid health status degradation, necessitating firmware updates.
-These incidents demonstrate that firmware defects are not simple one time input errors but rather manifest only when long-term accumulated internal states and complex metadata management reach critical thresholds.
+Additionally, consumer high-performance SSDs such as the Samsung 980 Pro and 990 Pro experienced issues~\cite{tomshw-samsung-ssd} where metadata processing logic errors caused drives to enter read-only mode or exhibit abnormally rapid health status degradation, necessitating firmware updates.
+These incidents demonstrate that firmware defects are not simple one-time input errors but rather manifest only when long-term accumulated internal states and complex metadata management reach critical thresholds.
 
 However, SSD firmware verification remains challenging.
 Unit testing and random I/O generation fail to effectively detect complex state-dependent operations.
 Coverage-guided fuzzing (CGF) tools increase code coverage but encounter state-unaware limitations in SSD firmware.
-Maintenance routines such as GC operate on a threshold basis, triggering only upon accumulation of millions of I/O operations when valid page thresholds are reached.
+Maintenance routines such as GC operate on a threshold basis, triggering only after millions of I/O operations drive free blocks below a threshold.
 Conventional CGF focuses on state initialization and immediate coverage, failing to build long-term history.
 Furthermore, the nondeterminism caused by SSD channel parallelism and background scheduling introduces feedback noise, making bug reproduction difficult~\cite{chen2016internal, zhang2023excessive}.
 
@@ -492,9 +492,9 @@ Rather, the more meaningless variables there are, the more state space explosion
 Of the 40 variables extracted by CSFuzz, only 4 are meaningful to actual GC logic (precision 10.0\%).
 The remaining 36 are noise variables: compiler-generated exception-handling internals (\texttt{cleanup.dest.slot}, \texttt{ehselector.slot}, \texttt{exn.slot}), ASan instrumentation byproducts such as raw pointer addresses (\texttt{this.addr}, \texttt{plane\_address.addr}), and loop counters (\texttt{repeat}, \texttt{repeat218}, \texttt{repeat243}).
 
-In contrast, TVDA performs backward slicing based on threshold comparison patterns (free\_block\_pool\_size < threshold), extracting only variables that directly affect GC trigger conditions such as free block count and invalid page count.
+In contrast, TVDA performs backward slicing based on threshold comparison patterns (\texttt{free\_block\_pool\_size < threshold}), extracting only variables that directly affect GC trigger conditions such as free block count and invalid page count.
 Similar patterns were observed in the FEMU environment.
-CSFuzz extracted 23 variables, but only 1 was valid (precision 4.3\%); many of the rest were duplicates or meaningless variables like \%cleanup.dest.slot.
+CSFuzz extracted 23 variables, but only 1 was valid (precision 4.3\%); many of the rest were duplicates or meaningless variables like \texttt{\%cleanup.dest.slot}.
 TVDA accurately identified 10 variables directly used in FEMU's GC decision logic, of which 5 were valid (precision 50.0\%).
 
 \subsubsection{Relationship with State Corpus Generation}
@@ -519,7 +519,7 @@ First, CSFuzz's noise variables change frequently regardless of I/O, so Adaptive
 Second, TVDA's critical variables change gradually with actual I/O accumulation, and DRP accurately captures these subtle changes as new states.
 
 TVDA showed 5 times higher precision than CSFuzz in MQSim (50\% vs 10\%) and 12 times higher in FEMU (50\% vs 4.3\%).
-The noise variables extracted by TVDA (block\_id, pageID, pgs\_per\_blk, etc.) are physical address variables where I/O operates.
+The noise variables extracted by TVDA (\texttt{block\_id}, \texttt{pageID}, \texttt{pgs\_per\_blk}, etc.) are physical address variables that change on every I/O.
 These variables appear near threshold comparison statements and were included during the slicing process, but they change frequently with every I/O and act as noise during state tracking.
 This demonstrates the limitation that static analysis alone cannot perfectly determine dynamic characteristics of variables, which can be improved through future combination with dynamic profiling.
 
