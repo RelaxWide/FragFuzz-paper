@@ -151,7 +151,7 @@ DGF cannot understand this data causality, making it ineffective for SSD firmwar
 \subsection{Firmware Validation Platforms}
 SSD firmware validation requires balancing hardware fidelity with software visibility.
 Modern simulators such as MQSim~\cite{mqsim} have significantly narrowed the reality gap through detailed NVMe protocol modeling, while recent data-driven calibration that trains a deep neural network on paired simulator/device execution profiles~\cite{lee} reduces simulation error to approximately 3\%.
-In contrast, hardware platforms like OpenSSD~\cite{openssd, cosmosplus} suffer from state opacity—real-time variable tracking via JTAG or UART causes probe effects that can mask timing-sensitive cases, while repetitive stress testing accelerates physical wearout.
+In contrast, hardware platforms like OpenSSD~\cite{openssd, cosmosplus} suffer from state opacity---real-time variable tracking via JTAG or UART causes probe effects that can mask timing-sensitive cases, while repetitive stress testing accelerates physical wearout.
 We therefore evaluate on the FEMU~\cite{femu} and MQSim simulators, which expose firmware internals without these hardware limitations.
 
 \subsection{Analysis and Control of SSD Nondeterminism}
@@ -608,7 +608,7 @@ While these are optimized for firmware logic verification, they may not perfectl
 
 Therefore, timing race conditions may manifest differently in actual hardware environments, requiring additional verification through FPGA-based platforms or JTAG interfaces of actual SSDs in future work.
 Additionally, proprietary firmware from commercial SSD manufacturers may use more complex hybrid mapping or caching policies, so the experimental results of this research may not be directly reproducible.
-However, since the fundamental operating principle of FTLs—threshold-based maintenance operations—remains the same, we expect the core concept (State-Driven) of the proposed framework to be validly applicable to commercial firmware verification as well.
+However, since the fundamental operating principle of FTLs---threshold-based maintenance operations---remains the same, we expect the core concept (State-Driven) of the proposed framework to be validly applicable to commercial firmware verification as well.
 
 Completeness of Variable Extraction (Internal Validity): Since TVDA relies on static analysis, there is a possibility of missing some threshold variables (false negatives) in cases involving pointer aliasing or complex indirect references.
 Additionally, as analyzed in Section 5.D, TVDA shows 50\% precision and includes some noise variables (physical address-related indices, configuration constants, etc.).
@@ -622,7 +622,7 @@ Rather than serializing I/O, FragFuzz keeps a high-speed parallel environment an
 In this paper, we proposed FragFuzz (FTL Fragmentation-driven Fuzzer), a fuzzing framework that actively manipulates fragmentation states to verify deep state-dependent defects in SSD firmware.
 
 To overcome the limitations where coverage-guided fuzzing could not surpass state barriers and state-aware fuzzing remained at passive observation, FragFuzz integrates three techniques: TVDA automatically extracts the critical threshold variables, DRP tracks their gradual drift while preserving coverage information, and FFM filters timing noise while steering fuzzing toward worst-case fragmentation.
-The academic significance of this research lies in redefining fragmentation—not as a performance problem to be avoided, but as a powerful stressor for verification.
+The academic significance of this research lies in redefining fragmentation---not as a performance problem to be avoided, but as a powerful stressor for verification.
 This accelerated reaching deep maintenance logic while maintaining the high-load parallel execution environment that actual firmware experiences.
 
 Experimental results on both FEMU and MQSim platforms demonstrate that FragFuzz reached targets with 52.5\% fewer commands until GC triggering and 65.0\% fewer commands until GC completion compared to AFL++, while also showing improvements of 28.8\% and 48.4\% respectively compared to CSFuzz.
