@@ -368,11 +368,16 @@ Thus, FEMU is primarily used to evaluate nondeterminism mitigation and FFM effec
 \item \textbf{Random Fuzzer:} Performs random parameter input for I/O (Write/Read) operations.
 \item \textbf{AFL++:} The representative state-of-the-art coverage-guided fuzzing tool, serving as a pure CGF baseline without state-aware capabilities.
 \item \textbf{State-Data Aware Fuzzer:} A state-data-aware SSD firmware fuzzer utilizing replay through Case-Based Reasoning.
-\item \textbf{GRAFT:} An SSD firmware testing tool using graph reinforcement learning (RL), evaluated in its modified MQSim (Samsung) environment with offline pre-training.
+\item \textbf{GRAFT:} An SSD firmware testing tool using graph reinforcement learning (RL); its figure is reported from the original paper, obtained in a modified MQSim (Samsung) environment with offline pre-training.
 \item \textbf{CSFuzz:} A state-of-the-art state-aware fuzzer that identifies critical variables through static analysis and tracks states using Adaptive Partitioning.
-\item \textbf{FragFuzz (TVDA+Adaptive):} A configuration combining the proposed TVDA-based variable extraction with existing Adaptive Partitioning.
-\item \textbf{FragFuzz (TVDA+DRP):} A configuration combining TVDA with the proposed Dynamic Range Partitioning.
-\item \textbf{FragFuzz (TVDA+DRP+FFM):} The final configuration adding fragmentation metrics (FFM) to DRP.
+\end{itemize}
+
+\subsubsection{FragFuzz Configurations (Ablation)}
+We evaluate three cumulative configurations of FragFuzz, each isolating one component against the corresponding research question:
+\begin{itemize}
+\item \textbf{TVDA+Adaptive:} TVDA-extracted variables tracked with CSFuzz's Adaptive Partitioning; comparing it against TVDA+DRP isolates the contribution of DRP (RQ3).
+\item \textbf{TVDA+DRP:} adds the proposed Dynamic Range Partitioning.
+\item \textbf{TVDA+DRP+FFM:} the full FragFuzz, adding the FTL Fragmentation Metric; comparing it against TVDA+DRP isolates the contribution of FFM (RQ4).
 \end{itemize}
 
 \subsubsection{Experimental Settings}
