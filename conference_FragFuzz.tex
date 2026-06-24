@@ -224,13 +224,10 @@ First, the analyzer traverses the control flow graph (CFG) of the target functio
 At this point, operands compared against constants are extracted as potential state variable candidates.
 Subsequently, filtering based on variable naming conventions is performed to precisely select actual threshold variables from the collected candidates.
 
-Based on a recent survey of SSD simulators and emulators~\cite{gheibi2025survey}, we examined five major open-source emulator and simulator platforms that accurately reproduce actual SSD firmware behavior: FEMU~\cite{femu}, MQSim~\cite{mqsim}, ZNS+~\cite{znsplus}, NVMeVirt~\cite{nvmevirt}, and ConfZNS~\cite{confzns}.
-Across all of these platforms, the threshold variables that gate core maintenance logic---such as GC triggering, Must-GC, wear leveling, thermal throttling, and lifespan management---consistently follow a small set of naming conventions, sharing keywords such as \texttt{thres}, \texttt{limit}, and \texttt{bound} (for example, FEMU's \texttt{gc\_thres\_lines} and MQSim's \texttt{GC\_Exec\_Threshold}).
-This empirical regularity is precisely what allows TVDA to remain fully automated: instead of relying on hand-crafted, per-platform variable lists, it exploits these recurring naming patterns as a lightweight, platform-agnostic filter.
-
-TVDA applies these empirically verified patterns to icmp instruction analysis, finalizing variables that structurally correspond to comparison statements while simultaneously satisfying domain naming conventions as Critical Sinks.
-Since SSD firmware contains tens of thousands of general branches, simple structural analysis alone would result in mass extraction of meaningless variables.
-This strategy effectively eliminates such noise by combining domain-specific patterns, precisely targeting only true positive threshold variables that govern the firmware's core maintenance logic.
+Rather than a hand-crafted, per-platform keyword list, we derive a generalizable \emph{threshold-sink pattern}: a branch comparison (\texttt{icmp}/\texttt{switch}) in which a named state variable is tested against a constant or configuration bound, and whose identifier belongs to a compact lexical family of threshold terms (e.g., \texttt{thres}, \texttt{limit}, \texttt{bound}).
+To establish that this pattern generalizes, we examined five major open-source platforms identified by a recent survey~\cite{gheibi2025survey}---FEMU~\cite{femu}, MQSim~\cite{mqsim}, ZNS+~\cite{znsplus}, NVMeVirt~\cite{nvmevirt}, and ConfZNS~\cite{confzns}---and found that the variables gating GC triggering, Must-GC, wear leveling, thermal throttling, and lifespan management match it on every platform (e.g., FEMU's \texttt{gc\_thres\_lines} tested in \texttt{should\_gc}, and MQSim's \texttt{GC\_Exec\_Threshold}).
+TVDA matches this pattern over the \texttt{icmp} instructions, retaining as Critical Sinks only operands that are simultaneously structural comparison targets and lexical members of the threshold family.
+Because SSD firmware contains tens of thousands of general branches, it is this joint structural-plus-lexical criterion---not structural analysis alone---that suppresses the resulting noise and isolates the true threshold variables governing core maintenance logic.
 
 \subsubsection*{Step 3: K-hop Backward Slicing}
 
@@ -260,13 +257,11 @@ This research proposes the Dynamic Range Partitioning (DRP) algorithm to capture
  \paragraph{Limitations of Existing Approaches}
 Figure 3 illustrates the limitations of existing partitioning strategies compared to DRP.
 
-\subparagraph{Fixed Partitioning~\cite{afl}:} Divides variable ranges into fixed sizes (e.g., $2^n$ buckets).
-However, the delta of SSD state variables is often negligible relative to their large dynamic ranges.
-As shown in the figure, even when a meaningful change of Delta=1,000 occurs in a situation where partition size is fixed at 8,192, this is treated as noise within the same partition (masked) and not conveyed to the fuzzer.
+\subparagraph{Fixed Partitioning~\cite{afl}:} Divides ranges into fixed-size (e.g., $2^n$) buckets.
+Because SSD state deltas are tiny relative to their large dynamic ranges, a meaningful change (e.g., Delta=1,000 under a fixed size of 8,192) is masked within one partition and never reaches the fuzzer.
 
-\subparagraph{Adaptive Range Partitioning~\cite{csfuzz}:} Expands partitions by $2^n$ based on initial values.
-This approach is sensitive initially, but as variable values drift farther from initial values, partition ranges expand exponentially.
-Consequently, sensitivity drastically decreases in the ``Low Boundary'' region (e.g., just before free block exhaustion) during late testing stages, forming a ``blind spot'' that misses the most important subtle changes just before threshold values.
+\subparagraph{Adaptive Range Partitioning~\cite{csfuzz}:} Expands partitions by $2^n$ from initial values, so it is sensitive early but coarsens exponentially as values drift.
+Sensitivity then collapses in the ``Low Boundary'' region (e.g., just before free-block exhaustion), forming a ``blind spot'' that misses the critical subtle changes just before the threshold.
 
 \subparagraph{Dynamic Range Partitioning (DRP):}
 DRP addresses these challenges by periodically recalibrating partition sizes based on the statistical distribution of observed state changes (deltas).
@@ -506,10 +501,8 @@ This suggests two effects.
 First, CSFuzz's noise variables change frequently regardless of I/O, so Adaptive Partitioning treats them as ``already seen states'' and ignores them.
 Second, TVDA's critical variables change gradually with actual I/O accumulation, and DRP accurately captures these subtle changes as new states.
 
-TVDA showed 5 times higher precision than CSFuzz in MQSim (50\% vs 10\%) and 12 times higher in FEMU (50\% vs 4.3\%).
-The noise variables extracted by TVDA (\texttt{block\_id}, \texttt{pageID}, \texttt{pgs\_per\_blk}, etc.) are physical address variables that change on every I/O.
-These variables appear near threshold comparison statements and were included during the slicing process, but they change frequently with every I/O and act as noise during state tracking.
-This demonstrates the limitation that static analysis alone cannot perfectly determine dynamic characteristics of variables, which can be improved through future combination with dynamic profiling.
+Even so, TVDA's higher precision is not perfect: some extracted variables (\texttt{block\_id}, \texttt{pageID}, \texttt{pgs\_per\_blk}) are physical-address fields that sit near threshold comparisons but change on every I/O, acting as noise during state tracking.
+This reflects a limitation of static analysis alone, which we revisit in the threats to validity and propose to address with dynamic profiling.
 
 
 \subsection{RQ3: Contribution of DRP}
@@ -597,12 +590,8 @@ Construct Validity: Two of our measurements rely on expert judgment.
 The I/O-related basic-block subset used for the curated coverage metric (Section 5.C) and the ``valid'' labeling of extracted threshold variables (Section 5.D) were both determined by SSD-firmware engineers against the platforms' documented logic.
 While guided by explicit criteria, these boundaries are inherently subjective and could shift the curated-coverage and precision figures under a different labeling.
 The FEMU campaign is additionally limited to three trials per configuration; we therefore report effect sizes for it and regard significance-level confirmation through a larger campaign as future work.
-Limitations of Emulation Environments (External Validity): The experiments were conducted in emulator/simulator environments, namely FEMU and MQSim.
-While these are optimized for firmware logic verification, they may not perfectly replicate the physical characteristics of actual NAND flash memory (electrical noise, latency variations due to temperature, etc.) or the precise timing of hardware controllers. 
-
-Therefore, timing race conditions may manifest differently in actual hardware environments, requiring additional verification through FPGA-based platforms or JTAG interfaces of actual SSDs in future work.
-Additionally, proprietary firmware from commercial SSD manufacturers may use more complex hybrid mapping or caching policies, so the experimental results of this research may not be directly reproducible.
-However, since the fundamental operating principle of FTLs---threshold-based maintenance operations---remains the same, we expect the core concept (State-Driven) of the proposed framework to be validly applicable to commercial firmware verification as well.
+Limitations of Emulation Environments (External Validity): Experiments used the FEMU and MQSim emulator/simulators, which may not replicate NAND's physical characteristics (electrical noise, temperature-dependent latency) or exact controller timing, so timing race conditions may differ on real hardware---motivating future FPGA- or JTAG-based validation.
+Commercial firmware may also use more complex hybrid mapping or caching, limiting direct reproducibility; however, since FTLs share the same threshold-based maintenance principle, we expect the State-Driven core concept to transfer to commercial firmware verification.
 
 Completeness of Variable Extraction (Internal Validity): Since TVDA relies on static analysis, there is a possibility of missing some threshold variables (false negatives) in cases involving pointer aliasing or complex indirect references.
 Additionally, as analyzed in Section 5.D, TVDA shows 50\% precision and includes some noise variables (physical address-related indices, configuration constants, etc.).
