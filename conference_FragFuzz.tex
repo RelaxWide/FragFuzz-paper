@@ -224,7 +224,7 @@ First, the analyzer traverses the control flow graph (CFG) of the target functio
 At this point, operands compared against constants are extracted as potential state variable candidates.
 Subsequently, filtering based on variable naming conventions is performed to precisely select actual threshold variables from the collected candidates.
 
-Rather than a hand-crafted, per-platform keyword list, we derive a generalizable \emph{threshold-sink pattern}: a branch comparison (\texttt{icmp}/\texttt{switch}) in which a named state variable is tested against a constant or configuration bound, and whose identifier belongs to a compact lexical family of threshold terms (e.g., \texttt{thres}, \texttt{limit}, \texttt{bound}).
+We derive a generalizable \emph{threshold-sink pattern}: a branch comparison (\texttt{icmp}/\texttt{switch}) in which a named state variable is tested against a constant or configuration bound, and whose identifier belongs to a compact lexical family of threshold terms (e.g., \texttt{thres}, \texttt{limit}, \texttt{bound}).
 To establish that this pattern generalizes, we examined five major open-source platforms identified by a recent survey~\cite{gheibi2025survey}---FEMU~\cite{femu}, MQSim~\cite{mqsim}, ZNS+~\cite{znsplus}, NVMeVirt~\cite{nvmevirt}, and ConfZNS~\cite{confzns}---and found that the variables gating GC triggering, Must-GC, wear leveling, thermal throttling, and lifespan management match it on every platform (e.g., FEMU's \texttt{gc\_thres\_lines} tested in \texttt{should\_gc}, and MQSim's \texttt{GC\_Exec\_Threshold}).
 TVDA matches this pattern over the \texttt{icmp} instructions, retaining as Critical Sinks only operands that are simultaneously structural comparison targets and lexical members of the threshold family.
 Because SSD firmware contains tens of thousands of general branches, it is this joint structural-plus-lexical criterion---not structural analysis alone---that suppresses the resulting noise and isolates the true threshold variables governing core maintenance logic.
@@ -233,12 +233,12 @@ Because SSD firmware contains tens of thousands of general branches, it is this 
 
 The identified threshold variables are important in themselves, but they may be the computational results of multiple base variables.
 Therefore, to reach the underlying base variables that the fuzzer can directly control, TVDA automatically performs backward slicing on the Program Dependency Graph (PDG)~\cite{horwitz_pdg}.
-The key parameter is the slicing depth (Hop Depth, $K$), which TVDA fixes algorithmically as part of the automated pipeline, rather than requiring manual, per-platform inspection of simulator source code.
+The key parameter is the slicing depth (Hop Depth, $K$), which TVDA fixes algorithmically as part of the automated pipeline.
 We set $K=5$ based on the hierarchical data-management structure inherent to SSD FTLs: from I/O request processing to the final update of global resource state, an FTL typically exposes five abstraction layers (Request $\rightarrow$ Page $\rightarrow$ Block $\rightarrow$ Line/Superblock $\rightarrow$ Global Resource), so the conditions that gate core maintenance logic such as GC triggering lie at most five hops from the threshold comparison.
 Localized logic such as wear leveling or victim-block selection sits even closer (3--4 hops).
-Importantly, $K$ is an \emph{upper bound} on the slice depth rather than a tuned operating point: TVDA collects every base variable within $K$ hops, so the choice is deliberately asymmetric.
+Here $K$ is an \emph{upper bound} on the slice depth: TVDA collects every base variable within $K$ hops, so the choice is deliberately asymmetric.
 A larger $K$ would only admit additional variables that, being further from the threshold comparison, tend to be noise---which the downstream DRP stage already filters by treating frequently changing variables as already-seen states---whereas a smaller $K$ risks omitting a genuine base variable (a false negative).
-Setting $K=5$ to match the deepest FTL abstraction layer therefore provides a conservative, structurally grounded default that captures all core maintenance logic without per-simulator hand-tuning, which is why we fix it across all platforms rather than searching it as a hyperparameter.
+Setting $K=5$ to match the deepest FTL abstraction layer therefore provides a conservative, structurally grounded default that captures all core maintenance logic, and we fix it across all platforms.
 
 \subsubsection*{Step 4: Instrumentation}
 The final extracted variable list is instrumented at compile time and monitored at runtime through shared memory with minimal overhead.
@@ -389,7 +389,7 @@ Due to the inherent randomness of fuzzing, repeated experiments were conducted f
 We adopt the number of I/O commands, rather than wall-clock time, as the primary deterministic metric to strictly evaluate algorithmic efficiency independent of hardware throughput.
 To account for the inherent randomness of fuzzing, we report statistical significance using the two-sided Mann--Whitney $U$ test together with the Vargha--Delaney $\hat{A}_{12}$ effect size and Cohen's $d$; for the proposed configuration we additionally report 95\% confidence intervals.
 For the MQSim campaign (10 trials per configuration) these tests are well powered, whereas the computationally expensive FEMU campaign (3 trials) is interpreted through effect sizes rather than significance thresholds.
-All baselines and FragFuzz are driven through the identical \texttt{nvme-cli} command interface and input-parsing harness, so that observed differences arise solely from the guidance algorithm rather than from the I/O delivery path.
+All baselines and FragFuzz are driven through the identical \texttt{nvme-cli} command interface and input-parsing harness.
 
 The primary measurement metrics are as follows:
 
@@ -430,9 +430,8 @@ This demonstrates that DRP-based precise state tracking accelerates threshold at
 These gains are statistically significant: the GC-trigger reductions over AFL++ and CSFuzz both yield Mann--Whitney $p<0.001$ with $\hat{A}_{12}=0.00$ and $0.04$ respectively (i.e., nearly every FragFuzz run requires fewer commands than every run of the baseline), and the proposed configuration attains a tight 95\% confidence interval of [682.6K, 776.9K] commands.
 The GC-completion reductions over AFL++ ($p<0.001$) and CSFuzz ($p<0.01$) are likewise significant, with large effect sizes (Cohen's $d=-4.2$ and $-1.5$).
 Although the learning-based GRAFT reaches GC in fewer raw commands (600,156), this figure is obtained in a modified simulator with a larger device and costly offline pre-training.
-Crucially, GRAFT's artifacts are not publicly available and its modified simulator is undisclosed, so a controlled head-to-head experiment is infeasible; the figure is reproduced from the original paper for context only and must not be read as a same-environment comparison.
+Because GRAFT's artifacts and modified simulator are not public, a controlled comparison is infeasible, and its figure is reproduced from the original paper for context.
 On the standard, unmodified MQSim, FragFuzz attains comparable efficiency without any pre-training while additionally tracking GC completion, which GRAFT does not report.
-It is worth clarifying why we evaluate \emph{reachability efficiency} rather than bug count.
 FragFuzz is, by design, a directed greybox fuzzer aimed at a specific class of deep maintenance logic; unlike CFG-distance directed fuzzers such as AFLGo~\cite{aflgo}, it is directed by accumulated state distance toward threshold conditions rather than code distance.
 For directed fuzzers the established effectiveness axis is the cost to reach the target, not aggregate bug count, and two properties of our setting reinforce this: the targets are mature emulator/simulator codebases in which residual deep-logic faults are scarce, and a triggered fault halts the emulator, making campaign-style crash counting infeasible.
 The actionable signal is therefore how quickly the fuzzer reaches the deep maintenance logic, witnessed by the near-complete datapath coverage reported in the following subsection.
@@ -443,7 +442,6 @@ Absolute Basic Block (BB) coverage saturates at similar levels across all fuzzer
 Absolute BB coverage alone is therefore not a discriminating metric for datapath exploration.
 To assess exploration of the maintenance datapath specifically, the subset of basic blocks lying on the host write/read and GC datapaths was identified by SSD-firmware domain experts against each platform's documented FTL logic, using a fixed criterion: a block is included if it is reachable from an NVMe read/write command handler and participates in mapping update, invalidation, victim selection, or GC execution.
 Over this curated I/O-related subset, FragFuzz reaches approximately 99\% coverage, indicating near-complete exploration of the datapath logic that governs deep maintenance behavior.
-We note that the boundary of this subset is expert-defined and thus carries a degree of subjectivity, which we record as a threat to construct validity.
 This confirms that the relevant differentiator among fuzzers is not the final coverage plateau but the number of commands required to reach the deep maintenance logic, which is the primary metric adopted throughout this evaluation.
 
 \subsection{RQ2: Effectiveness of TVDA}
