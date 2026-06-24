@@ -43,7 +43,7 @@ Existing state-aware fuzzing techniques assume discrete state transitions and th
 
 In this paper, we propose FragFuzz (FTL Fragmentation-driven Fuzzer), a greybox fuzzing framework that actively drives SSD firmware toward worst-case fragmentation states to efficiently trigger deep maintenance logic.
 Our approach integrates three key techniques.
-First, Threshold-Variable Dependency Analysis (TVDA) automatically extracts critical variables governing GC trigger conditions through backward slicing on program dependency graph information.
+First, Threshold-Variable Dependency Analysis (TVDA) automatically extracts critical variables governing GC trigger conditions through backward slicing on the program dependency graph.
 Second, Dynamic Range Partitioning (DRP) effectively tracks gradual variable changes while preserving coverage information under value drift.
 Third, FTL Fragmentation Metric (FFM) mitigates timing noise in nondeterministic environments by prioritizing inputs that intensify internal fragmentation.
 
@@ -126,8 +126,8 @@ For instance, annotation-based approaches such as IJON~\cite{ijon} require manua
 They fail to account for the threshold-based internal states of SSDs, such as invalid page accumulation for GC triggers, which require continuous I/O sequences rather than discrete state changes.
 
 \subsubsection*{Directed Greybox Fuzzing (DGF).} Techniques such as AFLGo~\cite{aflgo} guide fuzzing toward target code locations based on CFG distance.
-However, for deep state logic, the objective is accumulating state distance through I/O operations, rather than reducing code distance.
-DGF cannot understand this data causality, making it ineffective for SSD firmware verification.
+For deep state logic, the relevant notion of progress is \emph{state} distance accumulated through I/O operations, which CFG-distance DGF does not capture.
+FragFuzz retains this directed paradigm but steers along state distance toward threshold conditions.
 
 \subsection{Firmware Validation Platforms}
 SSD firmware validation requires balancing hardware fidelity with software visibility.
@@ -138,7 +138,7 @@ We therefore evaluate on the FEMU~\cite{femu} and MQSim simulators, which expose
 \subsection{Analysis and Control of SSD Nondeterminism}
 SSD parallel processing and asynchronous background operations induce I/O nondeterminism.
 Performance-oriented research such as IODA~\cite{ioda} suppresses nondeterminism for QoS, but this blocks opportunities for race conditions to manifest.
-State Data-Aware Fuzzing~\cite{statedataaware} passively follows state transitions without forcing complex contention states.
+State-Data Aware Fuzzing~\cite{statedataaware} passively follows state transitions without forcing complex contention states.
 In contrast, FragFuzz actively modulates nondeterminism by manipulating fragmentation states to maximize collision probability between host I/O and internal operations.
 
 \begin{figure*}[t]
@@ -318,7 +318,7 @@ Because $\mathcal{R}$ stores observed \emph{value ranges} rather than partition 
 The internal parallelism and asynchronous background operations of SSDs induce execution path nondeterminism.
 Coverage feedback can vary for identical inputs depending on scheduling timing, causing confusion (noise) for the fuzzer in selecting valid seeds.
 This research mitigates this problem by utilizing the FTL Fragmentation Metric (FFM), which quantifies fragmentation state, as both a noise filter and state anchor.
-FFM is a composite metric designed to quantify the most challenging states for SSD firmware to handle.
+FFM consists of three complementary metrics that quantify the states most challenging for SSD firmware to handle.
 We identified three key factors that determine firmware maintenance load, instrumenting them in real-time within the FTL and transmitting them to the fuzzer through shared memory.
 All metrics are normalized to a 0-1000 scale, where higher values indicate more severe fragmentation.
  \paragraph{Invalidation Ratio}
@@ -335,10 +335,7 @@ Measures how randomly distributed the mapping from logical to physical addresses
 Sequential writes generate low entropy, while random overwrites generate high entropy.
 High entropy means mapping table locality is destroyed, degrading cache efficiency and complicating valid page tracking during GC.
 
-The final FFM score is the equally weighted average of the three metrics.
-Since each metric captures a different aspect of fragmentation and their relative importance varies by workload, equal weighting is a robust, bias-free default.
-
-The three defined FFM metrics are integrated as tracking targets for the DRP algorithm along with variables extracted by TVDA.
+The three FFM metrics are integrated as independent tracking targets for the DRP algorithm, alongside the variables extracted by TVDA, so that no single fragmentation axis is privileged.
 Through this, not only variables directly involved in GC threshold conditions, but also gradual changes in fragmentation state are tracked as part of state coverage.
 The fuzzer considers both edge coverage changes and increases in DRP ranges of FFM metrics to distinguish state transitions.
 By adding seeds to the State Corpus only when one or more FFM metrics reach higher severity ranges, effective input sequences that intensify fragmentation can be preferentially selected even in nondeterministic environments.
@@ -493,7 +490,7 @@ This suggests two effects.
 First, CSFuzz's noise variables change frequently regardless of I/O, so Adaptive Partitioning treats them as ``already seen states'' and ignores them.
 Second, TVDA's critical variables change gradually with actual I/O accumulation, and DRP accurately captures these subtle changes as new states.
 
-Even so, TVDA's higher precision is not perfect: some extracted variables (\texttt{block\_id}, \texttt{pageID}, \texttt{pgs\_per\_blk}) are physical-address fields that sit near threshold comparisons but change on every I/O, acting as noise during state tracking.
+Even so, TVDA's higher precision is not perfect: some extracted variables (\texttt{block\_id}, \texttt{pageID}) are physical-address fields that sit near threshold comparisons but change on every I/O, acting as noise during state tracking.
 This reflects a limitation of static analysis alone, which we revisit in the threats to validity and propose to address with dynamic profiling.
 
 
