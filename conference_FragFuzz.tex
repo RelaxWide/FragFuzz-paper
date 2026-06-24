@@ -260,61 +260,59 @@ Because SSD state deltas are tiny relative to their large dynamic ranges, a mean
 Sensitivity then collapses in the ``Low Boundary'' region (e.g., just before free-block exhaustion), forming a ``blind spot'' that misses the critical subtle changes just before the threshold.
 
 \subparagraph{Dynamic Range Partitioning (DRP):}
-DRP addresses these challenges by periodically recalibrating partition sizes based on the statistical distribution of observed state changes (deltas).
+DRP addresses these challenges by sizing partitions from the observed magnitude of state changes (deltas) and recalibrating them as that magnitude drifts.
 The operating principle consists of two key phases.
 
-\noindent\textbf{Delta Tracking.} During the fuzzing loop, the Monitor records the magnitude of change, $\delta = |v_{\text{curr}} - v_{\text{last}}|$, in a sliding window buffer $H$.
+\noindent\textbf{Delta Tracking.} During the fuzzing loop, the Monitor records the magnitude of each change, $\delta = |v_{\text{curr}} - v_{\text{last}}|$, and maintains the running mean $\bar{\delta}$ of the observed nonzero deltas.
 
-\noindent\textbf{Dynamic Resizing.} The partition size $S$ is initialized once sufficient samples accumulate and is recalibrated whenever significant drift is detected.
-The new partition size is calculated as:
+\noindent\textbf{Dynamic Resizing.} Once enough samples accumulate, the partition size $S$ is set proportional to this typical step magnitude:
 
 \begin{equation}
 \label{eq:drp_sizing}
-S = \alpha \cdot \text{Median}(H) + (1-\alpha) \cdot P_{75}(H)
+S = \max\!\big(1,\ \lfloor 2\,\bar{\delta} \rfloor\big),
 \end{equation}
 
-\noindent where $\alpha$ is a weighting coefficient.
-We set $\alpha = 0.7$ to allocate 70\% weight to the typical change magnitude (Median) for stability, while assigning 30\% to the upper quartile ($P_{75}$) to accommodate exceptional variability.
-This approach ensures DRP remains robust against temporary noise while flexibly adapting to meaningful trends.
-Consequently, as shown in the bottom graph of Figure 3, DRP maintains consistent sensitivity across the entire test interval, continuously tracking the gradual state accumulation process without interruption.
+\noindent so that a meaningful change spans roughly one partition regardless of the variable's absolute scale, while the lower bound of $1$ prevents zero-width partitions for near-constant variables.
+$S$ is recalibrated only when the step distribution drifts: when a freshly computed $S'$ differs from the current $S$ by more than $50\%$, $S$ is replaced by $S'$.
+As shown in the bottom graph of Figure 3, DRP thereby maintains consistent sensitivity across the entire test interval, continuously tracking the gradual state accumulation process.
 
 \begin{algorithm}[t]
 \caption{Dynamic Range Partitioning (DRP)}
 \label{alg:drp}
 \begin{algorithmic}[1]
-\REQUIRE $v_{\text{curr}}$ (Current variable value), $\mathcal{C}$ (Set of covered ranges)
-\STATE \textbf{Persistent:} $S$ (Partition size), $H$ (Delta history window), $v_{\text{last}}$
-\ENSURE \textbf{True} if a new state is found, else \textbf{False}
+\REQUIRE $v$ (current variable value)
+\STATE \textbf{Persistent:} $S$ (partition size, init.\ $\bot$); $v_{\text{last}}$; running delta-mean $\bar{\delta}$ over $n_{\delta}$ samples; $\mathcal{R}$ (covered value ranges, init.\ $\emptyset$)
+\ENSURE \textbf{True} if a new value range is covered, else \textbf{False}
 
-\STATE $\delta \leftarrow |v_{\text{curr}} - v_{\text{last}}|$
-\STATE Update sliding window $H$ with $\delta$
+\STATE $\delta \leftarrow |v - v_{\text{last}}|$;\quad $v_{\text{last}} \leftarrow v$
+\IF{$\delta > 0$}
+    \STATE update $\bar{\delta}$ and $n_{\delta}$ with $\delta$
+\ENDIF
 
-\STATE \textit{// Phase 1: Adaptive Sizing (Initialization \& Recalibration)}
-\IF{$S = \emptyset$ \textbf{or} IsDrifting($H, \delta$)}
-    \IF{$|H| \geq \text{MIN\_SAMPLES}$}
-        \STATE $S \leftarrow \alpha \cdot \text{Median}(H) + (1-\alpha) \cdot P_{75}(H)$
+\STATE \textit{// Phase 1: Adaptive Sizing}
+\IF{$S = \bot$}
+    \IF{$n_{\delta} \geq \text{MIN\_OBS}$}
+        \STATE $S \leftarrow \max(1,\ \lfloor 2\bar{\delta} \rfloor)$
+    \ELSE
+        \RETURN \textbf{False}
     \ENDIF
 \ENDIF
 
 \STATE \textit{// Phase 2: Range Mapping \& Coverage Check}
-\IF{$S \neq \emptyset$}
-    \STATE $r_{\text{new}} \leftarrow \lfloor v_{\text{curr}} / S \rfloor$
-    \IF{$r_{\text{new}} \notin \mathcal{C}$}
-        \STATE $\mathcal{C} \leftarrow \mathcal{C} \cup \{r_{\text{new}}\}$
-        \STATE MergeAdjacentRanges($\mathcal{C}$) \COMMENT{Prevent state explosion}
-        \RETURN \textbf{True}
-    \ENDIF
+\STATE $r \leftarrow \big[\lfloor v/S \rfloor\, S,\ (\lfloor v/S \rfloor + 1)\, S - 1\big]$
+\IF{$r$ is contained in $\mathcal{R}$ (binary search)}
+    \RETURN \textbf{False}
 \ENDIF
-
-\RETURN \textbf{False}
+\STATE $\mathcal{R} \leftarrow \textsc{MergeAdjacent}(\mathcal{R} \cup \{r\})$
+\STATE \textbf{every} $N$ obs.: $S' \leftarrow \max(1,\lfloor 2\bar{\delta}\rfloor)$;\ \textbf{if} $|S'-S|/S > 0.5$ \textbf{then} $S \leftarrow S'$ \COMMENT{$\mathcal{R}$ preserved}
+\RETURN \textbf{True}
 \end{algorithmic}
 \end{algorithm}
 
 Algorithm~\ref{alg:drp} outlines the procedure.
-Upon each I/O execution, the algorithm updates the delta history and checks whether the partition size $S$ requires initialization or recalibration (Phase 1).
-If a drift is detected, $S$ is updated using Eq.~\ref{eq:drp_sizing}.
-Finally, the current value is mapped to a partition index $r_{\text{new}}$.
-If this index represents a previously unvisited range, the algorithm updates the coverage set $\mathcal{C}$ and signals a "New State" to the fuzzer (Phase 2).
+Upon each observation, DRP updates the running delta statistics and, if necessary, (re)computes the partition size $S$ via Eq.~\ref{eq:drp_sizing} (Phase 1).
+The current value is then mapped to the value range $r$ it falls into; if $r$ is not already contained in the covered set $\mathcal{R}$, it is added---merging with any overlapping or adjacent range---and a ``New State'' is signaled to the fuzzer (Phase 2).
+Because $\mathcal{R}$ stores observed \emph{value ranges} rather than partition indices, recalibrating $S$ never invalidates past coverage: a previously observed range stays valid regardless of the current partition size, which is precisely what lets DRP preserve sensitivity as the variable drifts toward its threshold.
 
 \subsection{Mitigating I/O Nondeterminism via FTL Fragmentation Metric}
 The internal parallelism and asynchronous background operations of SSDs induce execution path nondeterminism.
