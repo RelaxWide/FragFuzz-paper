@@ -232,13 +232,9 @@ Because SSD firmware contains tens of thousands of general branches, it is this 
 \subsubsection*{Step 3: K-hop Backward Slicing}
 
 The identified threshold variables are important in themselves, but they may be the computational results of multiple base variables.
-Therefore, to reach the underlying base variables that the fuzzer can directly control, TVDA automatically performs backward slicing on the Program Dependency Graph (PDG)~\cite{horwitz_pdg}.
-The key parameter is the slicing depth (Hop Depth, $K$), which TVDA fixes algorithmically as part of the automated pipeline.
-We set $K=5$ based on the hierarchical data-management structure inherent to SSD FTLs: from I/O request processing to the final update of global resource state, an FTL typically exposes five abstraction layers (Request $\rightarrow$ Page $\rightarrow$ Block $\rightarrow$ Line/Superblock $\rightarrow$ Global Resource), so the conditions that gate core maintenance logic such as GC triggering lie at most five hops from the threshold comparison.
-Localized logic such as wear leveling or victim-block selection sits even closer (3--4 hops).
-Here $K$ is an \emph{upper bound} on the slice depth: TVDA collects every base variable within $K$ hops, so the choice is deliberately asymmetric.
-A larger $K$ would only admit additional variables that, being further from the threshold comparison, tend to be noise---which the downstream DRP stage already filters by treating frequently changing variables as already-seen states---whereas a smaller $K$ risks omitting a genuine base variable (a false negative).
-Setting $K=5$ to match the deepest FTL abstraction layer therefore provides a conservative, structurally grounded default that captures all core maintenance logic, and we fix it across all platforms.
+To reach the underlying base variables that the fuzzer can directly control, TVDA automatically performs backward slicing on the Program Dependency Graph (PDG)~\cite{horwitz_pdg}, collecting every base variable within an upper-bound hop depth $K$.
+This bound follows from the structure of SSD FTLs: from I/O request processing to the final update of global resource state, an FTL exposes five hierarchical abstraction layers (Request $\rightarrow$ Page $\rightarrow$ Block $\rightarrow$ Line/Superblock $\rightarrow$ Global Resource), so the conditions gating core maintenance logic lie at most five hops from the threshold comparison; localized logic such as wear leveling or victim-block selection sits even closer (3--4 hops).
+We therefore set $K=5$, the deepest such layer, and apply it uniformly across all platforms.
 
 \subsubsection*{Step 4: Instrumentation}
 The final extracted variable list is instrumented at compile time and monitored at runtime through shared memory with minimal overhead.
