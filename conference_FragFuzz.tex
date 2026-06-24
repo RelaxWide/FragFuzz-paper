@@ -79,14 +79,8 @@ Furthermore, the nondeterminism caused by SSD channel parallelism and background
 To address these challenges, recent research has attempted state-aware fuzzing by modeling protocol states~\cite{aflnet, stateafl}, tracking specific variables~\cite{statefuzz}, or annotating deep-state targets~\cite{ijon}.
 However, applying these approaches to SSD firmware faces two critical limitations.
 
-First, the simplicity of state definitions.
-Existing studies primarily assume explicit state transitions such as finite state machines (FSMs), but the internal state of SSDs comprises complex structures involving both hardware and software, such as valid page distribution (VPD) across thousands of blocks.
-Simple variable value changes cannot represent or induce complex structural states such as fragmentation, where mapping tables become increasingly disorganized.
-
-Second, the absence of feedback for gradual changes.
-State changes in SSDs are not immediate.
-Tens of thousands of I/O operations must accumulate before reaching threshold values.
-Existing fuzzers provide feedback only when states completely change or new branches are discovered, causing them to misjudge useful input sequences that incrementally worsen states toward thresholds as ``no change'' and discard them.
+First, state definitions are too simple: existing studies assume explicit transitions (e.g., FSMs), whereas SSD internal state involves complex hardware/software structures such as valid page distribution across thousands of blocks, which simple variable-value changes cannot represent.
+Second, gradual changes receive no feedback: existing fuzzers signal only on complete state changes or new branches, so input sequences that incrementally push state toward thresholds (over tens of thousands of I/Os) are misjudged as ``no change'' and discarded.
 
 We address these limitations with FragFuzz, whose main contributions are as follows:
 \begin{enumerate}
@@ -113,16 +107,9 @@ Second, I/O is nondeterministic: due to address-mapping state, multi-channel que
 \subsection{FTL Fragmentation and State Complexity}
 In SSD firmware, fragmentation can be defined as a critical state that maximizes the logical complexity of firmware, beyond being a simple indicator of storage performance degradation.
 FTL fragmentation refers to a state where valid pages are irregularly distributed across physical blocks, exerting the following significant effects on firmware behavior.
- \paragraph{Control Flow Complexity} In low-fragmentation states (e.g., immediately after formatting), the FTL performs only simple mapping updates.
-In contrast, highly fragmented states (high entropy) require the FTL to perform cost-benefit analysis for victim block selection, valid page migration, and multiple merge operations on mapping tables.
-During this process, exception handling routines and complex conditional statements that are not normally executed become activated.
-\paragraph{Potential for Race Conditions} Fragmentation forcibly extends the execution time of background operations.
-In highly fragmented states where GC must run for extended periods, the probability of resource contention between host I/O requests and background operations increases significantly.
-Thus, fragmented states become an essential precondition for verifying the firmware's concurrency control logic.
-\paragraph{State Barrier} Under typical workloads, SSD firmware actively attempts to resolve fragmentation (defragmentation).
-Consequently, random I/O alone makes it difficult to reach worst-case fragmentation states that the firmware cannot efficiently handle.
-This implies that the target states fuzzing must reach are hidden behind a ``state barrier'' that does not naturally occur.
-Therefore, to trigger deep states in SSD firmware, a strategy is essential that does not simply send large volumes of I/O, but intentionally maximizes FTL fragmentation metrics to drive the firmware through extreme computational loads and complex state transitions.
+ \paragraph{Control Flow Complexity} Whereas low-fragmentation states (e.g., just after formatting) need only simple mapping updates, highly fragmented states force the FTL into cost-benefit victim selection, valid-page migration, and mapping-table merges, activating exception and edge-case paths that are otherwise dormant.
+\paragraph{Potential for Race Conditions} Fragmentation prolongs background operations, so in heavily fragmented states where GC runs for long periods, contention between host I/O and background work---and thus the firmware's concurrency-control logic---is far more likely to be exercised.
+\paragraph{State Barrier} Under typical workloads firmware actively defragments, so random I/O alone rarely reaches worst-case fragmentation; these target states sit behind a ``state barrier.'' Triggering deep states therefore requires intentionally maximizing FTL fragmentation rather than merely issuing large volumes of I/O.
 
 \section{Related Works}
 This section reviews existing research on SSD firmware verification, covering fuzzing techniques, validation platforms, and FTL fragmentation studies, and positions our state-driven approach within this landscape.
@@ -171,12 +158,9 @@ The recent study ``We Ain't Afraid of No File Fragmentation''~\cite{jun2024we} e
 Prior demand-based FTL research~\cite{dftl} demonstrated that efficient mapping table management significantly impacts GC overhead, as scattered mappings increase valid page migration costs.
 
 However, these studies have the limitation of viewing fragmentation only as a problem to solve.
-From a reliability verification perspective, pushing the system outside normal bounds is important.
 As fragmentation intensifies, firmware must reorganize metadata and perform GC more aggressively to secure scarce free blocks, during which complex concurrency control logic executes.
-Existing research analyzed the impact of fragmentation on performance but lacked attempts to utilize fragmentation as an attack vector for verifying firmware's extreme situation response capability.
-This research reverses this conventional perspective.
-We utilize fragmentation metrics not as targets to optimize, but rather as objective functions for fuzzing that should be maximized.
-This approach intentionally drives firmware to worst-case resource states, effectively exposing hidden resource exhaustion bugs and race conditions that do not manifest under typical workloads.
+Existing research analyzed the impact of fragmentation on performance but lacked attempts to utilize it as an attack vector for verifying firmware's extreme-situation response.
+This research reverses this conventional perspective: we utilize fragmentation metrics not as targets to optimize but as objective functions for fuzzing that should be maximized, intentionally driving firmware to worst-case resource states and exposing hidden resource-exhaustion bugs and race conditions that do not manifest under typical workloads.
 
 \subsection{Advanced Automated Testing Techniques}
 As software complexity increases, advanced automation techniques combining machine learning or static analysis beyond simple random testing have been proposed.
@@ -594,11 +578,8 @@ We regard this as strong corroborating evidence and identify an enlarged FEMU ca
 This section discusses the academic significance and extensibility of the proposed FragFuzz framework, and describes potential limitations (Threats to Validity) inherent in the experimental environment and methodology.
 
 \subsection{From Passive Observation to Active Shaping}
-Most existing state-aware fuzzing research has taken a passive approach that detects state changes and utilizes them as feedback.
-That is, the fuzzer waits to reach a specific state and provides rewards when that state is reached by chance.
-In contrast, the FragFuzz proposed in this research has important significance in shifting this paradigm to active shaping.
-We defined the fragmentation state where GC efficiency becomes worst as a clear target and designed the fuzzer to intentionally drive the system toward that state.
-This approach demonstrated that not only simple functional defects (crashes) but also performance bugs that degrade system performance and resource starvation problems can be systematically detected in the SSD domain.
+Most existing state-aware fuzzing is passive: the fuzzer waits to reach a state by chance and rewards it.
+FragFuzz instead shifts to active shaping---defining the worst-case fragmentation state as an explicit target and driving the system toward it---enabling systematic detection of performance bugs and resource-starvation problems in the SSD domain.
 
 \subsection{Justification for Threshold-Based Logic Targeting}
 Our choice of threshold-based logic as the core target is grounded in SSD firmware structure.
@@ -636,7 +617,6 @@ In this paper, we proposed FragFuzz (FTL Fragmentation-driven Fuzzer), a fuzzing
 
 To overcome the limitations where coverage-guided fuzzing could not surpass state barriers and state-aware fuzzing remained at passive observation, FragFuzz integrates three techniques: TVDA automatically extracts the critical threshold variables, DRP tracks their gradual drift while preserving coverage information, and FFM filters timing noise while steering fuzzing toward worst-case fragmentation.
 The academic significance of this research lies in redefining fragmentation---not as a performance problem to be avoided, but as a powerful stressor for verification.
-This accelerated reaching deep maintenance logic while maintaining the high-load parallel execution environment that actual firmware experiences.
 
 Experimental results on both FEMU and MQSim platforms demonstrate that FragFuzz reached targets with 51.9\% fewer commands until GC triggering and 64.2\% fewer commands until GC completion compared to AFL++, while also showing improvements of 28.8\% and 48.4\% respectively compared to CSFuzz.
 This demonstrates that the proposed technique is generally applicable without being dependent on specific platforms.
