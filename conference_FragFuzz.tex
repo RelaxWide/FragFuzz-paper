@@ -202,13 +202,13 @@ The core maintenance routines of SSD firmware execute only when specific interna
 Therefore, identifying and monitoring these variables is the first step in state-driven fuzzing.
 This research proposes TVDA (Threshold-Variable Dependency Analysis), a static analysis-based technique to automatically extract threshold-related variables without domain knowledge, as illustrated in Figure 2. TVDA is performed in the following four steps as depicted in Figure 1 (Phase 1).
 
-\begin{figure*}[t]
+\begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth, height=0.35\textheight, keepaspectratio]{fig2.png}
+\includegraphics[width=\columnwidth, keepaspectratio]{fig2.png}
 \caption{Threshold-Variable Dependency Analysis (TVDA) workflow.
 Starting from a target function (e.g., \texttt{GC\_Trigger}), TVDA identifies critical sinks through empirical pattern matching on threshold-related naming conventions, then performs $K$-hop backward slicing on the PDG to extract variables that influence the trigger condition.}
 \label{fig:tvda}
-\end{figure*}
+\end{figure}
 
 \subsubsection*{Step 1: Target Function Selection}
 
@@ -240,12 +240,12 @@ The final extracted variable list is instrumented at compile time and monitored 
 Once variables to monitor have been selected through TVDA, the next challenge is how to interpret changes in those variables at runtime.
 This research proposes the Dynamic Range Partitioning (DRP) algorithm to capture the continuous and subtle state changes of SSDs.
 
-\begin{figure*}[t]
+\begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth, height=0.35\textheight, keepaspectratio]{fig3.png}
+\includegraphics[width=\columnwidth, keepaspectratio]{fig3.png}
 \caption{Comparison of partitioning strategies for state variable tracking. (a) Fixed Partitioning: Large fixed-size buckets mask meaningful changes. (b) Adaptive Partitioning: Sensitivity degrades exponentially as values drift from initial values, creating blind spots near critical thresholds. (c) DRP: Maintains consistent sensitivity across all value ranges by dynamically recalibrating partition sizes based on observed delta statistics.}
 \label{fig:drp}
-\end{figure*}
+\end{figure}
 
  \paragraph{Limitations of Existing Approaches}
 Figure 3 illustrates the limitations of existing partitioning strategies compared to DRP.
