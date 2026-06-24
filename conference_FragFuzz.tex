@@ -587,7 +587,8 @@ The FEMU campaign is additionally limited to three trials per configuration; we 
 Limitations of Emulation Environments (External Validity): Experiments used the FEMU and MQSim emulator/simulators, which may not replicate NAND's physical characteristics (electrical noise, temperature-dependent latency) or exact controller timing, so timing race conditions may differ on real hardware---motivating future FPGA- or JTAG-based validation.
 Commercial firmware may also use more complex hybrid mapping or caching, limiting direct reproducibility; however, since FTLs share the same threshold-based maintenance principle, we expect the State-Driven core concept to transfer to commercial firmware verification.
 
-Completeness of Variable Extraction (Internal Validity): Since TVDA relies on static analysis, there is a possibility of missing some threshold variables (false negatives) in cases involving pointer aliasing or complex indirect references.
+Completeness of Variable Extraction (Internal Validity): Since TVDA relies on static analysis, there is a possibility of missing some threshold variables (false negatives) in cases involving pointer aliasing, complex indirect references, or trigger conditions nested deeper than the default slicing depth.
+The last case is resolved by raising $K$, since deeper slicing only adds candidate variables that DRP subsequently filters.
 Additionally, as analyzed in Section 5.D, TVDA shows 50\% precision and includes some noise variables (physical address-related indices, configuration constants, etc.).
 This demonstrates the limitation that static analysis alone cannot perfectly determine dynamic characteristics of variables (whether they change at runtime, frequency of changes).
 This can be improved in future work through combination with dynamic profiling to filter noise variables.
