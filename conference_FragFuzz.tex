@@ -90,7 +90,7 @@ We address these limitations with FragFuzz, whose main contributions are as foll
 \end{enumerate}
 
 \section{Background and Motivation}
-This section analyzes the threshold-based characteristics of SSD firmware and the role of FTL fragmentation in reaching deep internal states, motivating the necessity of state-driven fuzzing approaches.
+This section analyzes the specific characteristics of SSD firmware and the limitations of Coverage-Guided Fuzzing (CGF), and discusses the necessity of state-driven fuzzing approaches.
 
 \subsection{SSD Threshold-Based Operations}
 SSD controller firmware maps logical addresses to physical addresses through the Flash Translation Layer (FTL) and manages the out-of-place update nature of NAND flash.
@@ -98,6 +98,11 @@ Maintenance routines such as Garbage Collection (GC), wear leveling, and Bad Blo
 These routines operate on a threshold basis.
 GC is triggered upon accumulation of invalid pages or exhaustion of free blocks, while wear leveling executes when the erase count deviation among blocks exceeds a threshold.
 In other words, verification requires reaching deep states through the accumulation of millions of I/O operations rather than single I/O commands.
+
+\subsection{Limitations of CGF in SSD Testing}
+Coverage-guided fuzzers (CGF) such as AFL~\cite{afl} and AFL++~\cite{aflpp} save and mutate inputs that increase code coverage, but face two limitations in SSD firmware testing.
+First, they are insensitive to state changes: inputs that do not immediately raise coverage are discarded, losing the accumulated I/O needed to reach thresholds and yielding coverage plateaus.
+Second, I/O is nondeterministic: due to address-mapping state, multi-channel queuing, and background operations, identical input sequences may take different code paths depending on internal state, which confuses seed selection and degrades reproducibility.
 
 \subsection{FTL Fragmentation and State Complexity}
 In SSD firmware, fragmentation can be defined as a critical state that maximizes the logical complexity of firmware, beyond being a simple indicator of storage performance degradation.
