@@ -229,11 +229,9 @@ Because SSD firmware contains tens of thousands of general branches, it is this 
 \subsubsection*{Step 3: K-hop Backward Slicing}
 
 The identified threshold variables are important in themselves, but they may be the computational results of multiple base variables.
-To reach the underlying base variables that the fuzzer can directly control, TVDA automatically performs backward slicing on the Program Dependency Graph (PDG)~\cite{horwitz_pdg}, tracing each threshold comparison back to the fuzzer-controllable base variables that define it.
-Rather than fixing the hop depth $K$ a priori, TVDA measures, for every critical sink, the dependency distance from the threshold comparison to the base-variable definitions that feed it, and sets $K$ to the maximum distance observed.
-On both target FTLs this measurement converged on $K=5$: the dependency chains gating core maintenance logic span at most five hops from the threshold comparison, while more localized logic such as wear leveling or victim-block selection resolves within 3--4 hops.
-
-Because $K$ is derived from the measured dependency structure rather than assumed, it is firmware-specific. FTLs with shallower or deeper abstraction layering may converge on a different value, and TVDA adapts $K$ accordingly without manual tuning; raising $K$ only widens the candidate set, which DRP subsequently filters.
+To reach the underlying base variables that the fuzzer can directly control, TVDA automatically performs backward slicing on the Program Dependency Graph (PDG)~\cite{horwitz_pdg}.
+Rather than fixing the hop depth $K$ in advance, TVDA measures the dependency distance from each threshold comparison to the base variables that feed it and sets $K$ to the maximum observed; on both target FTLs this converged on $K=5$.
+Because $K$ is measured rather than assumed, other firmware may converge on a different value, which TVDA adopts automatically.
 
 \subsubsection*{Step 4: Instrumentation}
 The final extracted variable list is instrumented at compile time and monitored at runtime through shared memory with minimal overhead.
