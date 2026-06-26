@@ -64,7 +64,7 @@ This firmware internally manages complex maintenance operations such as the Flas
 Defects in these internal logic components can lead to catastrophic data loss~\cite{narayanan2016ssd, han2021indepth}, data corruption, or severe performance degradation issues that often manifest only after prolonged operation, making firmware reliability assurance essential.
 
 The risks posed by firmware defects stemming from accumulated state have been repeatedly demonstrated through real-world commercial product incidents.
-Notably, in 2019, HPE issued an urgent warning~\cite{hpe-ssd-bulletin} about a critical defect in certain SAS SSD models that would simultaneously suffer permanent failure upon reaching exactly 32,768 hours of operation time due to an internal counter overflow, prompting the release of emergency firmware updates.
+Notably, in 2019, HPE issued an urgent warning~\cite{hpe-ssd-bulletin} about a critical defect in certain SAS SSD models that would simultaneously suffer permanent failure upon reaching exactly 32,768 hours of operation due to an internal counter overflow, prompting the release of emergency firmware updates.
 
 Additionally, consumer high-performance SSDs such as the Samsung 980 Pro and 990 Pro experienced issues~\cite{tomshw-samsung-ssd} where metadata processing logic errors caused drives to enter read-only mode or exhibit abnormally rapid health status degradation, necessitating firmware updates.
 These incidents demonstrate that firmware defects are not simple one-time input errors but rather manifest only when long-term accumulated internal states and complex metadata management reach critical thresholds.
@@ -111,7 +111,7 @@ FTL fragmentation refers to a state where valid pages are irregularly distribute
 \paragraph{Potential for Race Conditions} Fragmentation prolongs background operations, so in heavily fragmented states where GC runs for long periods, contention between host I/O and background work---and thus the firmware's concurrency-control logic---is far more likely to be exercised.
 \paragraph{State Barrier} Under typical workloads firmware actively defragments, so random I/O alone rarely reaches worst-case fragmentation; these target states sit behind a ``state barrier.'' Triggering deep states therefore requires intentionally maximizing FTL fragmentation rather than merely issuing large volumes of I/O.
 
-\section{Related Works}
+\section{Related Work}
 This section reviews existing research on SSD firmware verification, covering fuzzing techniques, validation platforms, and FTL fragmentation studies, and positions our state-driven approach within this landscape.
 
 \subsection{Evolution of Fuzzing Techniques and State-Aware Approaches}
@@ -183,9 +183,9 @@ As illustrated in Figure 1, the overall methodology of FragFuzz consists of two 
 \subsection{Framework Overview}
 \subsubsection*{Phase 1: Automated Variable Discovery \& Instrumentation}
 
-This phase is a static analysis process that automatically identifies and prepares the threshold related state variables to be monitored within the firmware before fuzzing is performed.
+This phase is a static analysis process that automatically identifies and prepares the threshold-related state variables to be monitored within the firmware before fuzzing is performed.
 While SSD firmware contains thousands of global variables, only a small fraction govern critical maintenance logic such as GC.
-Phase 1 employs the TVDA (Threshold Variable Dependency Analysis) technique to discover these threshold-related variables without human intervention.
+Phase 1 employs the TVDA (Threshold-Variable Dependency Analysis) technique to discover these threshold-related variables without human intervention.
 Specifically, after identifying entry conditions (e.g., if val $<$ TH) of target functions through pattern matching, $K$-hop backward slicing based on the Program Dependency Graph (PDG)~\cite{horwitz_pdg} is performed to trace the dependency chains of variables affecting those conditions.
 The finally extracted variables are instrumented into the firmware binary and mapped to shared memory.
 
@@ -316,7 +316,7 @@ The internal parallelism and asynchronous background operations of SSDs induce e
 Coverage feedback can vary for identical inputs depending on scheduling timing, causing confusion (noise) for the fuzzer in selecting valid seeds.
 This research mitigates this problem by utilizing the FTL Fragmentation Metric (FFM), which quantifies fragmentation state, as both a noise filter and state anchor.
 FFM consists of three complementary metrics that quantify the states most challenging for SSD firmware to handle.
-We identified three key factors that determine firmware maintenance load, instrumenting them in real-time within the FTL and transmitting them to the fuzzer through shared memory.
+We identified three key factors that determine firmware maintenance load, instrumenting them in real time within the FTL and transmitting them to the fuzzer through shared memory.
 All metrics are normalized to a 0-1000 scale, where higher values indicate more severe fragmentation.
  \paragraph{Invalidation Ratio}
 The ratio of invalidations occurring relative to total write requests.
@@ -488,7 +488,7 @@ FragFuzz (TVDA+DRP) & 6 & 562.6 \\
 \end{tabularx}
 \end{table}
 
-While CSFuzz tracks 40 variables yet achieves only 65.4 State Corpus Adds, TVDA+DRP registered 562.6 states with only 6 variables.
+While CSFuzz tracks 40 variables yet achieves only 65.4 State Corpus Adds, TVDA+DRP registers 562.6 states with only 6 variables.
 This suggests two effects.
 First, CSFuzz's noise variables change frequently regardless of I/O, so Adaptive Partitioning treats them as ``already seen states'' and ignores them.
 Second, TVDA's critical variables change gradually with actual I/O accumulation, and DRP accurately captures these subtle changes as new states.
